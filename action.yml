@@ -1,0 +1,49 @@
+name: "Cherry pick backport"
+description: "GitHub action for cherry pick commits from Pull Requests into Release branches"
+inputs:
+  token:
+    description: "GITHUB_TOKEN or a `repo` scoped Personal Access Token (PAT)"
+    default: ${{ github.token }}
+    required: false
+  committer:
+    description: >
+      The committer name and email address in the format `Display Name <email@address.com>`.
+      Defaults to the GitHub Actions bot user.
+    default: "GitHub <noreply@github.com>"
+    required: false
+  author:
+    description: >
+      The author name and email address in the format `Display Name <email@address.com>`.
+      Defaults to the user who triggered the workflow run.
+    default: "${{ github.actor }} <${{ github.actor }}@users.noreply.github.com>"
+    required: false
+  branch:
+    description: "Name of the branch to merge the cherry pick."
+    required: true
+  labels:
+    description: "A comma separated list of labels."
+    required: false
+  automerge:
+    description: "If is true, will automatically merge cherry-pick PR."
+    required: false
+    default: "false"
+  mergeMethod:
+    description: "Github merge method: merge|rebase|squash"
+    required: false
+    default: "merge"
+  assignees:
+    description: "A comma separated list of assignees (GitHub usernames)."
+    required: false
+outputs:
+  cherry-pr-number:
+    description: "Number of the created PR."
+  cherry-pr-url:
+    description: "URL of the created PR."
+  error-message:
+    description: "Detailed message if error occurs."
+runs:
+  using: node16
+  main: dist/index.js
+branding:
+  icon: 'git-pull-request'
+  color: 'orange'
