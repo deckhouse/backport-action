@@ -17,7 +17,7 @@ export async function run(): Promise<void> {
       branch: core.getInput("branch"),
       labels: utils.getInputAsArray("labels"),
       automerge: core.getBooleanInput("automerge"),
-      mergeMethod: utils.getInputMergeMethod("mergeMethod"),
+      mergeMethod: utils.getInputMergeMethod("merge_method"),
       assignees: utils.getInputAsArray("assignees"),
       committer: core.getInput("committer"),
     };
@@ -55,7 +55,7 @@ export async function run(): Promise<void> {
     const result = await gitExec(["cherry-pick", `${githubSha}`]);
     if (result.exitCode !== 0 && !result.stderr.includes(CHERRYPICK_EMPTY)) {
       const msg = `Failure: cherry-pick commit ${githubSha} to the branch [${inputs.branch}](${github.context.serverUrl}/${github.context.repo.owner}/${github.context.repo.repo}/tree/${inputs.branch}) failed. See [Job](${github.context.serverUrl}/${github.context.repo.owner}/${github.context.repo.repo}/actions/runs/${github.context.runId}) for details.`;
-      core.setOutput("error-message", msg);
+      core.setOutput("error_message", msg);
       throw new Error(`Cherry-pick error: ${result.stderr}`);
     }
     core.endGroup();

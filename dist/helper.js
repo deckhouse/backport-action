@@ -57,8 +57,8 @@ function createPullRequest(inputs, prBranch) {
                 title,
                 body,
             });
-            core.setOutput("cherry-pr-number", pull.data.number);
-            core.setOutput("cherry-pr-url", pull.data.html_url);
+            core.setOutput("cherry_pr_number", pull.data.number);
+            core.setOutput("cherry_pr_url", pull.data.html_url);
             if (inputs.labels.length > 0) {
                 core.info(`Applying labels '${inputs.labels}'`);
                 yield octokit.rest.issues.addLabels({
@@ -90,7 +90,7 @@ function createPullRequest(inputs, prBranch) {
                         const msg = `Failure: Cherry pick [PR](${pull.data.html_url}) was created but cannot be merged`;
                         const detailedMsg = "Cherry-pick PR was created but cannot be merged: " +
                             res.data.message;
-                        core.setOutput("error-message", msg);
+                        core.setOutput("error_message", msg);
                         core.error(detailedMsg);
                         core.setFailed(detailedMsg);
                         return;

@@ -44,8 +44,8 @@ export async function createPullRequest(
       title,
       body,
     });
-    core.setOutput("cherry-pr-number", pull.data.number);
-    core.setOutput("cherry-pr-url", pull.data.html_url);
+    core.setOutput("cherry_pr_number", pull.data.number);
+    core.setOutput("cherry_pr_url", pull.data.html_url);
 
     // Apply labels
     if (inputs.labels.length > 0) {
@@ -102,7 +102,7 @@ export async function createPullRequest(
           const detailedMsg =
             "Cherry-pick PR was created but cannot be merged: " +
             res.data.message;
-          core.setOutput("error-message", msg);
+          core.setOutput("error_message", msg);
           core.error(detailedMsg);
           core.setFailed(detailedMsg);
           return;

@@ -27,7 +27,7 @@ inputs:
     description: "If is true, will automatically merge cherry-pick PR."
     required: false
     default: "false"
-  mergeMethod:
+  merge_method:
     description: "Github merge method: merge|rebase|squash"
     required: false
     default: "merge"
@@ -35,11 +35,11 @@ inputs:
     description: "A comma separated list of assignees (GitHub usernames)."
     required: false
 outputs:
-  cherry-pr-number:
+  cherry_pr_number:
     description: "Number of the created PR."
-  cherry-pr-url:
+  cherry_pr_url:
     description: "URL of the created PR."
-  error-message:
+  error_message:
     description: "Detailed message if error occurs."
 runs:
   using: node16

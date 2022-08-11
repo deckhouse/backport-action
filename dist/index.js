@@ -64,8 +64,8 @@ function createPullRequest(inputs, prBranch) {
                 title,
                 body,
             });
-            core.setOutput("cherry-pr-number", pull.data.number);
-            core.setOutput("cherry-pr-url", pull.data.html_url);
+            core.setOutput("cherry_pr_number", pull.data.number);
+            core.setOutput("cherry_pr_url", pull.data.html_url);
             if (inputs.labels.length > 0) {
                 core.info(`Applying labels '${inputs.labels}'`);
                 yield octokit.rest.issues.addLabels({
@@ -97,7 +97,7 @@ function createPullRequest(inputs, prBranch) {
                         const msg = `Failure: Cherry pick [PR](${pull.data.html_url}) was created but cannot be merged`;
                         const detailedMsg = "Cherry-pick PR was created but cannot be merged: " +
                             res.data.message;
-                        core.setOutput("error-message", msg);
+                        core.setOutput("error_message", msg);
                         core.error(detailedMsg);
                         core.setFailed(detailedMsg);
                         return;
@@ -176,7 +176,7 @@ function run() {
                 branch: core.getInput("branch"),
                 labels: utils.getInputAsArray("labels"),
                 automerge: core.getBooleanInput("automerge"),
-                mergeMethod: utils.getInputMergeMethod("mergeMethod"),
+                mergeMethod: utils.getInputMergeMethod("merge_method"),
                 assignees: utils.getInputAsArray("assignees"),
                 committer: core.getInput("committer"),
             };
@@ -202,7 +202,7 @@ function run() {
             const result = yield gitExec(["cherry-pick", `${githubSha}`]);
             if (result.exitCode !== 0 && !result.stderr.includes(CHERRYPICK_EMPTY)) {
                 const msg = `Failure: cherry-pick commit ${githubSha} to the branch [${inputs.branch}](${github.context.serverUrl}/${github.context.repo.owner}/${github.context.repo.repo}/tree/${inputs.branch}) failed. See [Job](${github.context.serverUrl}/${github.context.repo.owner}/${github.context.repo.repo}/actions/runs/${github.context.runId}) for details.`;
-                core.setOutput("error-message", msg);
+                core.setOutput("error_message", msg);
                 throw new Error(`Cherry-pick error: ${result.stderr}`);
             }
             core.endGroup();
