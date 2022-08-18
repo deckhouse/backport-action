@@ -6,6 +6,7 @@ export interface Inputs {
   committer: string;
   author: string;
   branch: string;
+  commit: string;
   labels: string[];
   automerge: boolean;
   mergeMethod: "merge" | "rebase" | "squash" | undefined;

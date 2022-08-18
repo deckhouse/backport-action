@@ -179,6 +179,7 @@ function run() {
                 token: core.getInput("token"),
                 author: core.getInput("author"),
                 branch: core.getInput("branch"),
+                commit: core.getInput("commit"),
                 labels: utils.getInputAsArray("labels"),
                 automerge: core.getBooleanInput("automerge"),
                 mergeMethod: utils.getInputMergeMethod("merge_method"),
@@ -186,7 +187,7 @@ function run() {
                 committer: core.getInput("committer"),
             };
             core.info(`Cherry pick into branch ${inputs.branch}!`);
-            const githubSha = process.env.GITHUB_SHA;
+            const githubSha = inputs.commit || process.env.GITHUB_SHA;
             const prBranch = `cherry-pick-${inputs.branch}-${githubSha}`;
             core.startGroup("Configuring the committer and author");
             const parsedAuthor = utils.parseDisplayNameEmail(inputs.author);

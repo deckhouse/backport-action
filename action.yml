@@ -20,6 +20,9 @@ inputs:
   branch:
     description: "Name of the branch to merge the cherry pick."
     required: true
+  commit:
+    description: "SHA of the cherry-picking commit. Default: GITHUB_SHA"
+    required: false
   labels:
     description: "A comma separated list of labels."
     required: false

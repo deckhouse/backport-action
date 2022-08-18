@@ -15,6 +15,7 @@ export async function run(): Promise<void> {
       token: core.getInput("token"),
       author: core.getInput("author"),
       branch: core.getInput("branch"),
+      commit: core.getInput("commit"),
       labels: utils.getInputAsArray("labels"),
       automerge: core.getBooleanInput("automerge"),
       mergeMethod: utils.getInputMergeMethod("merge_method"),
@@ -24,7 +25,7 @@ export async function run(): Promise<void> {
 
     core.info(`Cherry pick into branch ${inputs.branch}!`);
 
-    const githubSha = process.env.GITHUB_SHA;
+    const githubSha = inputs.commit || process.env.GITHUB_SHA;
     const prBranch = `cherry-pick-${inputs.branch}-${githubSha}`;
 
     // Configure the committer and author
