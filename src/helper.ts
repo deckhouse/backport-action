@@ -115,7 +115,13 @@ export async function createPullRequest(
           ref: "heads/" + prBranch,
         });
       } catch (e: any) {
-        core.warning("PR was created but cannot be merged: " + e.message);
+        const msg = `Failure: Cherry pick [PR](${pull.data.html_url}) was created but cannot be merged`;
+        const detailedMsg =
+            "Cherry-pick PR was created but cannot be merged: " + e;
+        core.setOutput("error_message", msg);
+        core.error(detailedMsg);
+        core.setFailed(detailedMsg);
+        return;
       }
     }
   }
