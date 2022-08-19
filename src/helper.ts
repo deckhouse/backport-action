@@ -10,6 +10,7 @@ export interface Inputs {
   labels: string[];
   automerge: boolean;
   mergeMethod: "merge" | "rebase" | "squash" | undefined;
+  deleteMergeBranch: boolean;
   assignees: string[];
 }
 
@@ -109,15 +110,17 @@ export async function createPullRequest(
           return;
         }
 
-        try {
-          core.info(`Cherry-pick PR was merged. Delete branch: ${prBranch}`);
-          octokit.rest.git.deleteRef({
-            owner,
-            repo,
-            ref: "heads/" + prBranch,
-          });
-        } catch (e) {
-          core.info(`PR branch ${prBranch} is already deleted`);
+        if (inputs.deleteMergeBranch) {
+          try {
+            core.info(`Cherry-pick PR was merged. Delete branch: ${prBranch}`);
+            octokit.rest.git.deleteRef({
+              owner,
+              repo,
+              ref: "heads/" + prBranch,
+            });
+          } catch (e) {
+            core.info(`PR branch ${prBranch} is already deleted`);
+          }
         }
       } catch (e: any) {
         const msg = `Failure: Cherry pick [PR](${pull.data.html_url}) was created but cannot be merged`;

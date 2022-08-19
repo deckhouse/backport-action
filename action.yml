@@ -34,6 +34,10 @@ inputs:
     description: "Github merge method: merge|rebase|squash"
     required: false
     default: "merge"
+  delete-merge-branch:
+    description: "Delete created cherry-pick branch. You can use it if autodelete on merge is disabled"
+    required: false
+    default: "false"
   assignees:
     description: "A comma separated list of assignees (GitHub usernames)."
     required: false

@@ -102,16 +102,18 @@ function createPullRequest(inputs, prBranch) {
                         core.setFailed(detailedMsg);
                         return;
                     }
-                    try {
-                        core.info(`Cherry-pick PR was merged. Delete branch: ${prBranch}`);
-                        octokit.rest.git.deleteRef({
-                            owner,
-                            repo,
-                            ref: "heads/" + prBranch,
-                        });
-                    }
-                    catch (e) {
-                        core.info(`PR branch ${prBranch} is already deleted`);
+                    if (inputs.deleteMergeBranch) {
+                        try {
+                            core.info(`Cherry-pick PR was merged. Delete branch: ${prBranch}`);
+                            octokit.rest.git.deleteRef({
+                                owner,
+                                repo,
+                                ref: "heads/" + prBranch,
+                            });
+                        }
+                        catch (e) {
+                            core.info(`PR branch ${prBranch} is already deleted`);
+                        }
                     }
                 }
                 catch (e) {
@@ -188,6 +190,7 @@ function run() {
                 labels: utils.getInputAsArray("labels"),
                 automerge: core.getBooleanInput("automerge"),
                 mergeMethod: utils.getInputMergeMethod("merge_method"),
+                deleteMergeBranch: core.getBooleanInput("delete-merge-branch"),
                 assignees: utils.getInputAsArray("assignees"),
                 committer: core.getInput("committer"),
             };

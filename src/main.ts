@@ -19,6 +19,7 @@ export async function run(): Promise<void> {
       labels: utils.getInputAsArray("labels"),
       automerge: core.getBooleanInput("automerge"),
       mergeMethod: utils.getInputMergeMethod("merge_method"),
+      deleteMergeBranch: core.getBooleanInput("delete-merge-branch"),
       assignees: utils.getInputAsArray("assignees"),
       committer: core.getInput("committer"),
     };
