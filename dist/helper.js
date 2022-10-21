@@ -43,11 +43,33 @@ function createPullRequest(inputs, prBranch) {
             let title = github.context.payload &&
                 github.context.payload.pull_request &&
                 github.context.payload.pull_request.title;
-            title = "Backport: " + title;
-            core.info(`Using title '${title}'`);
-            const body = github.context.payload &&
+            let body = github.context.payload &&
                 github.context.payload.pull_request &&
                 github.context.payload.pull_request.body;
+            if (!title || !body) {
+                if (process.env.SOURCE_PR_NUMBER) {
+                    core.info(`Fetching title and body from source PR '${process.env.SOURCE_PR_NUMBER}'`);
+                    try {
+                        const pull_number = parseInt(process.env.SOURCE_PR_NUMBER);
+                        const source_pr = yield octokit.rest.pulls.get({
+                            owner,
+                            repo,
+                            pull_number: pull_number,
+                        });
+                        if (!title) {
+                            title = source_pr.data.title;
+                        }
+                        if (!body) {
+                            body = source_pr.data.body || '';
+                        }
+                    }
+                    catch (e) {
+                        core.warning(`Failed to get source PR: ${e}`);
+                    }
+                }
+            }
+            title = "Backport: " + title;
+            core.info(`Using title '${title}'`);
             core.info(`Using body '${body}'`);
             const pull = yield octokit.rest.pulls.create({
                 owner,
