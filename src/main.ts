@@ -9,6 +9,19 @@ import { ExecOptions } from "@actions/exec";
 const CHERRYPICK_EMPTY =
   "The previous cherry-pick is now empty, possibly due to conflict resolution.";
 
+/** GitHub may reject push while checking workflow updates; transient server timeouts mention this phrase. */
+const GIT_PUSH_WORKFLOW_CHECK_TIMEOUT = "due to timeout";
+const GIT_PUSH_MAX_ATTEMPTS = 10;
+const GIT_PUSH_RETRY_DELAY_MS = 5000;
+
+function isGithubWorkflowPushTimeout(stderr: string): boolean {
+  return stderr.toLowerCase().includes(GIT_PUSH_WORKFLOW_CHECK_TIMEOUT);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export async function run(): Promise<void> {
   try {
     const inputs: Inputs = {
@@ -62,9 +75,28 @@ export async function run(): Promise<void> {
     }
     core.endGroup();
 
-    // Push new branch
+    // Push new branch (retry on GitHub-side workflow validation timeout)
     core.startGroup("Push new branch to remote");
-    const pushResult = await gitExec(["push", "-u", "origin", `${prBranch}`]);
+    let pushResult = await gitExec(
+      ["push", "-u", "origin", `${prBranch}`],
+      { liveOutput: true }
+    );
+    let pushAttempt = 1;
+    while (
+      pushResult.exitCode !== 0 &&
+      pushAttempt < GIT_PUSH_MAX_ATTEMPTS &&
+      isGithubWorkflowPushTimeout(pushResult.stderr)
+    ) {
+      core.warning(
+        `git push failed (attempt ${pushAttempt}/${GIT_PUSH_MAX_ATTEMPTS}): workflow check timed out on GitHub; retrying in ${GIT_PUSH_RETRY_DELAY_MS / 1000}s`
+      );
+      await sleep(GIT_PUSH_RETRY_DELAY_MS);
+      pushAttempt++;
+      pushResult = await gitExec(
+        ["push", "-u", "origin", `${prBranch}`],
+        { liveOutput: true }
+      );
+    }
     core.endGroup();
     if (pushResult.exitCode !== 0) {
       throw new Error(
@@ -81,19 +113,36 @@ export async function run(): Promise<void> {
   }
 }
 
-async function gitExec(params: string[]): Promise<GitOutput> {
+type GitExecOptions = {
+  /** Echo stdout/stderr as git writes (useful for long push / server-side delays). */
+  liveOutput?: boolean;
+};
+
+async function gitExec(
+  params: string[],
+  execOpts?: GitExecOptions
+): Promise<GitOutput> {
   const result = new GitOutput();
   const stdout: string[] = [];
   const stderr: string[] = [];
+
+  core.info(`git argv: ${JSON.stringify(params)}`);
+  const started = Date.now();
 
   const options: ExecOptions = {
     ignoreReturnCode: true,
     listeners: {
       stdout: (data: Buffer) => {
         stdout.push(data.toString());
+        if (execOpts?.liveOutput) {
+          process.stdout.write(data);
+        }
       },
       stderr: (data: Buffer) => {
         stderr.push(data.toString());
+        if (execOpts?.liveOutput) {
+          process.stderr.write(data);
+        }
       },
     },
   };
@@ -103,10 +152,20 @@ async function gitExec(params: string[]): Promise<GitOutput> {
   result.stdout = stdout.join("");
   result.stderr = stderr.join("");
 
+  const elapsedMs = Date.now() - started;
+  core.info(
+    `git finished in ${elapsedMs}ms, exit code ${result.exitCode}, cwd ${process.cwd()}`
+  );
+
   if (result.exitCode === 0) {
-    core.info(result.stdout.trim());
+    if (!execOpts?.liveOutput && result.stdout.trim()) {
+      core.info(result.stdout.trim());
+    }
   } else {
-    core.info(result.stderr.trim());
+    core.info(`--- git stderr (${result.stderr.length} bytes) ---`);
+    core.info(result.stderr.trim() || "(empty)");
+    core.info(`--- git stdout (${result.stdout.length} bytes) ---`);
+    core.info(result.stdout.trim() || "(empty)");
   }
 
   return result;
