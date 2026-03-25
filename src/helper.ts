@@ -1,5 +1,6 @@
 import * as github from "@actions/github";
 import * as core from "@actions/core";
+import * as utils from "./utils";
 
 export interface Inputs {
   token: string;
@@ -63,14 +64,22 @@ export async function createPullRequest(
     core.info(`Using body '${body}'`);
 
     // Create PR
-    const pull = await octokit.rest.pulls.create({
-      owner,
-      repo,
-      head: prBranch,
-      base: inputs.branch,
-      title,
-      body,
-    });
+    let pull;
+    try {
+      pull = await octokit.rest.pulls.create({
+        owner,
+        repo,
+        head: prBranch,
+        base: inputs.branch,
+        title,
+        body,
+      });
+    } catch (e: unknown) {
+      const detail = utils.formatOctokitRequestError(e);
+      throw new Error(
+        `Pull request create failed for ${owner}/${repo} (head="${prBranch}", base="${inputs.branch}"). ${detail}`
+      );
+    }
     core.setOutput("cherry_pr_number", pull.data.number);
     core.setOutput("cherry_pr_url", pull.data.html_url);
 

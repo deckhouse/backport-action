@@ -1,5 +1,28 @@
 import * as core from "@actions/core";
 
+/** Octokit RequestError and similar: include status and full GitHub JSON body. */
+export function formatOctokitRequestError(err: unknown): string {
+  if (typeof err !== "object" || err === null) {
+    return String(err);
+  }
+  const o = err as {
+    message?: string;
+    status?: number;
+    response?: { data?: unknown };
+  };
+  const parts: string[] = [];
+  if (typeof o.status === "number") {
+    parts.push(`HTTP ${o.status}`);
+  }
+  if (typeof o.message === "string") {
+    parts.push(o.message);
+  }
+  if (o.response?.data !== undefined) {
+    parts.push(`body: ${JSON.stringify(o.response.data)}`);
+  }
+  return parts.length > 0 ? parts.join(" | ") : String(err);
+}
+
 export function getInputAsArray(
   name: string,
   options?: core.InputOptions

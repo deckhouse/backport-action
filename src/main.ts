@@ -64,8 +64,13 @@ export async function run(): Promise<void> {
 
     // Push new branch
     core.startGroup("Push new branch to remote");
-    await gitExec(["push", "-u", "origin", `${prBranch}`]);
+    const pushResult = await gitExec(["push", "-u", "origin", `${prBranch}`]);
     core.endGroup();
+    if (pushResult.exitCode !== 0) {
+      throw new Error(
+        `git push failed (exit ${pushResult.exitCode}); branch "${prBranch}" is not on the remote, so GitHub rejects head="${prBranch}" when creating the PR.\n${pushResult.stderr.trim()}`
+      );
+    }
 
     // Create pull request
     core.startGroup("Opening pull request with cherry-pick");
