@@ -23,9 +23,6 @@ inputs:
   commit:
     description: "SHA of the cherry-picking commit. Default: GITHUB_SHA"
     required: false
-  milestone:
-    description: "Pull Request Milestone"
-    required: false
   labels:
     description: "A comma separated list of labels."
     required: false

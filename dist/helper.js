@@ -31,29 +31,83 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
+var __asyncValues = (this && this.__asyncValues) || function (o) {
+    if (!Symbol.asyncIterator) throw new TypeError("Symbol.asyncIterator is not defined.");
+    var m = o[Symbol.asyncIterator], i;
+    return m ? m.call(o) : (o = typeof __values === "function" ? __values(o) : o[Symbol.iterator](), i = {}, verb("next"), verb("throw"), verb("return"), i[Symbol.asyncIterator] = function () { return this; }, i);
+    function verb(n) { i[n] = o[n] && function (v) { return new Promise(function (resolve, reject) { v = o[n](v), settle(resolve, reject, v.done, v.value); }); }; }
+    function settle(resolve, reject, d, v) { Promise.resolve(v).then(function(v) { resolve({ value: v, done: d }); }, reject); }
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.createPullRequest = createPullRequest;
 const core = __importStar(require("@actions/core"));
 const github = __importStar(require("@actions/github"));
-function formatOctokitError(prefix, err) {
-    var _a;
-    if (typeof err !== "object" || err === null) {
-        return `${prefix}: ${String(err)}`;
+function releaseVersionPrefixFromBranch(branch) {
+    const m = branch.trim().match(/^release-(\d+\.\d+)$/i);
+    return m ? m[1] : null;
+}
+function parseThreePartVersion(title) {
+    const t = title.trim().replace(/^v/i, "");
+    const m = t.match(/^(\d+)\.(\d+)\.(\d+)$/);
+    if (!m)
+        return null;
+    return [parseInt(m[1], 10), parseInt(m[2], 10), parseInt(m[3], 10)];
+}
+function compareSemverTriple(a, b) {
+    for (let i = 0; i < 3; i++) {
+        if (a[i] !== b[i])
+            return a[i] - b[i];
     }
-    const o = err;
-    const parts = [prefix];
-    if (o.status != null) {
-        parts.push(`HTTP ${o.status}`);
-    }
-    if (o.message) {
-        parts.push(o.message);
-    }
-    if (((_a = o.response) === null || _a === void 0 ? void 0 : _a.data) !== undefined) {
-        parts.push(typeof o.response.data === "string"
-            ? o.response.data
-            : JSON.stringify(o.response.data));
-    }
-    return parts.join(" — ");
+    return 0;
+}
+function listOpenMilestonesForReleaseBranch(octokit, owner, repo, branch) {
+    return __awaiter(this, void 0, void 0, function* () {
+        var _a, e_1, _b, _c;
+        const prefix = releaseVersionPrefixFromBranch(branch);
+        if (!prefix)
+            return [];
+        const [wantMajor, wantMinor] = prefix.split(".").map((x) => parseInt(x, 10));
+        const out = [];
+        try {
+            for (var _d = true, _e = __asyncValues(octokit.paginate.iterator(octokit.rest.issues.listMilestones, {
+                owner,
+                repo,
+                state: "open",
+                per_page: 100,
+            })), _f; _f = yield _e.next(), _a = _f.done, !_a; _d = true) {
+                _c = _f.value;
+                _d = false;
+                const { data: milestones } = _c;
+                for (const m of milestones) {
+                    if (m.number == null || !m.title)
+                        continue;
+                    const triple = parseThreePartVersion(m.title);
+                    if (!triple)
+                        continue;
+                    const [maj, min] = triple;
+                    if (maj !== wantMajor || min !== wantMinor)
+                        continue;
+                    out.push({ number: m.number, title: m.title });
+                }
+            }
+        }
+        catch (e_1_1) { e_1 = { error: e_1_1 }; }
+        finally {
+            try {
+                if (!_d && !_a && (_b = _e.return)) yield _b.call(_e);
+            }
+            finally { if (e_1) throw e_1.error; }
+        }
+        out.sort((x, y) => compareSemverTriple(parseThreePartVersion(x.title), parseThreePartVersion(y.title)));
+        return out;
+    });
+}
+function getFirstOpenMilestoneNumberForReleaseBranch(octokit, owner, repo, branch) {
+    return __awaiter(this, void 0, void 0, function* () {
+        var _a, _b;
+        const list = yield listOpenMilestonesForReleaseBranch(octokit, owner, repo, branch);
+        return (_b = (_a = list[0]) === null || _a === void 0 ? void 0 : _a.number) !== null && _b !== void 0 ? _b : null;
+    });
 }
 function createPullRequest(inputs, prBranch) {
     return __awaiter(this, void 0, void 0, function* () {
@@ -99,21 +153,17 @@ function createPullRequest(inputs, prBranch) {
             });
             core.setOutput("cherry_pr_number", pull.data.number);
             core.setOutput("cherry_pr_url", pull.data.html_url);
-            if (inputs.milestone != null) {
-                core.info(`Using milestone '${inputs.milestone}'`);
-                try {
+            let milestoneNumber = null;
+            if (releaseVersionPrefixFromBranch(inputs.branch) != null) {
+                milestoneNumber = yield getFirstOpenMilestoneNumberForReleaseBranch(octokit, owner, repo, inputs.branch);
+                if (milestoneNumber != null) {
+                    core.info(`Setting milestone #${milestoneNumber} on PR #${pull.data.number}`);
                     yield octokit.rest.issues.update({
-                        owner: owner,
-                        repo: repo,
+                        owner,
+                        repo,
                         issue_number: pull.data.number,
-                        milestone: inputs.milestone,
+                        milestone: milestoneNumber,
                     });
-                }
-                catch (e) {
-                    const msg = formatOctokitError(`Failed to set milestone '${inputs.milestone}' on PR #${pull.data.number}`, e);
-                    core.error(msg);
-                    core.setFailed(msg);
-                    return;
                 }
             }
             if (inputs.labels.length > 0) {

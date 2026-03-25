@@ -48,7 +48,6 @@ function run() {
                 author: core.getInput("author"),
                 branch: core.getInput("branch"),
                 commit: core.getInput("commit"),
-                milestone: core.getInput("milestone"),
                 labels: utils.getInputAsArray("labels"),
                 automerge: core.getBooleanInput("automerge"),
                 mergeMethod: utils.getInputMergeMethod("merge_method"),

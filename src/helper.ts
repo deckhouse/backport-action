@@ -1,30 +1,99 @@
 import * as core from "@actions/core";
 import * as github from "@actions/github";
 
-function formatOctokitError(prefix: string, err: unknown): string {
-  if (typeof err !== "object" || err === null) {
-    return `${prefix}: ${String(err)}`;
+
+type Octokit = ReturnType<typeof github.getOctokit>;
+
+/** release-1.67 → "1.67" */
+function releaseVersionPrefixFromBranch(branch: string): string | null {
+  const m = branch.trim().match(/^release-(\d+\.\d+)$/i);
+  return m ? m[1]! : null;
+}
+
+/** "1.67.1", "v1.67.2" → [1,67,1]; otherwise null */
+function parseThreePartVersion(
+  title: string,
+): [number, number, number] | null {
+  const t = title.trim().replace(/^v/i, "");
+  const m = t.match(/^(\d+)\.(\d+)\.(\d+)$/);
+  if (!m) return null;
+  return [parseInt(m[1]!, 10), parseInt(m[2]!, 10), parseInt(m[3]!, 10)];
+}
+
+function compareSemverTriple(
+  a: [number, number, number],
+  b: [number, number, number],
+): number {
+  for (let i = 0; i < 3; i++) {
+    if (a[i] !== b[i]) return a[i]! - b[i]!;
   }
-  const o = err as {
-    status?: number;
-    message?: string;
-    response?: { data?: unknown };
-  };
-  const parts = [prefix];
-  if (o.status != null) {
-    parts.push(`HTTP ${o.status}`);
+  return 0;
+}
+
+interface MilestoneForBranch {
+  number: number;
+  title: string;
+}
+
+/**
+ * Open milestones whose title is major.minor.patch matching branch release-major.minor.
+ */
+async function listOpenMilestonesForReleaseBranch(
+  octokit: Octokit,
+  owner: string,
+  repo: string,
+  branch: string,
+): Promise<MilestoneForBranch[]> {
+  const prefix = releaseVersionPrefixFromBranch(branch);
+  if (!prefix) return [];
+
+  const [wantMajor, wantMinor] = prefix.split(".").map((x) => parseInt(x, 10));
+
+  const out: MilestoneForBranch[] = [];
+
+  for await (const { data: milestones } of octokit.paginate.iterator(
+    octokit.rest.issues.listMilestones,
+    {
+      owner,
+      repo,
+      state: "open",
+      per_page: 100,
+    },
+  )) {
+    for (const m of milestones) {
+      if (m.number == null || !m.title) continue;
+      const triple = parseThreePartVersion(m.title);
+      if (!triple) continue;
+      const [maj, min] = triple;
+      if (maj !== wantMajor || min !== wantMinor) continue;
+      out.push({ number: m.number, title: m.title });
+    }
   }
-  if (o.message) {
-    parts.push(o.message);
-  }
-  if (o.response?.data !== undefined) {
-    parts.push(
-      typeof o.response.data === "string"
-        ? o.response.data
-        : JSON.stringify(o.response.data),
-    );
-  }
-  return parts.join(" — ");
+
+  out.sort((x, y) =>
+    compareSemverTriple(
+      parseThreePartVersion(x.title)!,
+      parseThreePartVersion(y.title)!,
+    ),
+  );
+
+  return out;
+}
+
+/** Smallest patch among open milestones (e.g. 1.67.1 before 1.67.2). */
+async function getFirstOpenMilestoneNumberForReleaseBranch(
+  octokit: Octokit,
+  owner: string,
+  repo: string,
+  branch: string,
+): Promise<number | null> {
+  const list = await listOpenMilestonesForReleaseBranch(
+    octokit,
+    owner,
+    repo,
+    branch,
+  );
+  return list[0]?.number ?? null;
 }
 
 export interface Inputs {
@@ -33,7 +102,6 @@ export interface Inputs {
   author: string;
   branch: string;
   commit: string;
-  milestone: string;
   labels: string[];
   automerge: boolean;
   mergeMethod: "merge" | "rebase" | "squash" | undefined;
@@ -102,24 +170,25 @@ export async function createPullRequest(
     core.setOutput("cherry_pr_number", pull.data.number);
     core.setOutput("cherry_pr_url", pull.data.html_url);
 
-    // Add milestone
-    if (inputs.milestone != null) {
-      core.info(`Using milestone '${inputs.milestone}'`);
-      try {
-        await octokit.rest.issues.update({
-          owner: owner,
-          repo: repo,
-          issue_number: pull.data.number,
-          milestone: inputs.milestone,
-        });
-      } catch (e) {
-        const msg = formatOctokitError(
-          `Failed to set milestone '${inputs.milestone}' on PR #${pull.data.number}`,
-          e,
+    // Milestone only for release base branches, e.g. release-1.67
+    let milestoneNumber: number | null = null;
+    if (releaseVersionPrefixFromBranch(inputs.branch) != null) {
+      milestoneNumber = await getFirstOpenMilestoneNumberForReleaseBranch(
+        octokit,
+        owner,
+        repo,
+        inputs.branch,
+      );
+      if (milestoneNumber != null) {
+        core.info(
+          `Setting milestone #${milestoneNumber} on PR #${pull.data.number}`,
         );
-        core.error(msg);
-        core.setFailed(msg);
-        return;
+        await octokit.rest.issues.update({
+          owner,
+          repo,
+          issue_number: pull.data.number,
+          milestone: milestoneNumber,
+        });
       }
     }
 
