@@ -1,6 +1,32 @@
 import * as core from "@actions/core";
 import * as github from "@actions/github";
 
+function formatOctokitError(prefix: string, err: unknown): string {
+  if (typeof err !== "object" || err === null) {
+    return `${prefix}: ${String(err)}`;
+  }
+  const o = err as {
+    status?: number;
+    message?: string;
+    response?: { data?: unknown };
+  };
+  const parts = [prefix];
+  if (o.status != null) {
+    parts.push(`HTTP ${o.status}`);
+  }
+  if (o.message) {
+    parts.push(o.message);
+  }
+  if (o.response?.data !== undefined) {
+    parts.push(
+      typeof o.response.data === "string"
+        ? o.response.data
+        : JSON.stringify(o.response.data),
+    );
+  }
+  return parts.join(" — ");
+}
+
 export interface Inputs {
   token: string;
   committer: string;
@@ -73,19 +99,29 @@ export async function createPullRequest(
       body,
     });
 
-    // Add milestone
-    core.info(`Using milestone '${inputs.milestone}'`);
-    if (inputs.milestone != null) {
-      await octokit.rest.issues.update({
-        owner: owner,
-        repo: repo,
-        issue_number: pull.data.id,
-        milestone: inputs.milestone,
-      });
-    }
-
     core.setOutput("cherry_pr_number", pull.data.number);
     core.setOutput("cherry_pr_url", pull.data.html_url);
+
+    // Add milestone
+    if (inputs.milestone != null) {
+      core.info(`Using milestone '${inputs.milestone}'`);
+      try {
+        await octokit.rest.issues.update({
+          owner: owner,
+          repo: repo,
+          issue_number: pull.data.number,
+          milestone: inputs.milestone,
+        });
+      } catch (e) {
+        const msg = formatOctokitError(
+          `Failed to set milestone '${inputs.milestone}' on PR #${pull.data.number}`,
+          e,
+        );
+        core.error(msg);
+        core.setFailed(msg);
+        return;
+      }
+    }
 
     // Apply labels
     if (inputs.labels.length > 0) {

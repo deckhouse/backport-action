@@ -42,6 +42,26 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.createPullRequest = createPullRequest;
 const core = __importStar(__nccwpck_require__(2186));
 const github = __importStar(__nccwpck_require__(5438));
+function formatOctokitError(prefix, err) {
+    var _a;
+    if (typeof err !== "object" || err === null) {
+        return `${prefix}: ${String(err)}`;
+    }
+    const o = err;
+    const parts = [prefix];
+    if (o.status != null) {
+        parts.push(`HTTP ${o.status}`);
+    }
+    if (o.message) {
+        parts.push(o.message);
+    }
+    if (((_a = o.response) === null || _a === void 0 ? void 0 : _a.data) !== undefined) {
+        parts.push(typeof o.response.data === "string"
+            ? o.response.data
+            : JSON.stringify(o.response.data));
+    }
+    return parts.join(" — ");
+}
 function createPullRequest(inputs, prBranch) {
     return __awaiter(this, void 0, void 0, function* () {
         const octokit = github.getOctokit(inputs.token);
@@ -84,17 +104,25 @@ function createPullRequest(inputs, prBranch) {
                 title,
                 body,
             });
-            core.info(`Using milestone '${inputs.milestone}'`);
-            if (inputs.milestone != null) {
-                yield octokit.rest.issues.update({
-                    owner: owner,
-                    repo: repo,
-                    issue_number: pull.data.id,
-                    milestone: inputs.milestone,
-                });
-            }
             core.setOutput("cherry_pr_number", pull.data.number);
             core.setOutput("cherry_pr_url", pull.data.html_url);
+            if (inputs.milestone != null) {
+                core.info(`Using milestone '${inputs.milestone}'`);
+                try {
+                    yield octokit.rest.issues.update({
+                        owner: owner,
+                        repo: repo,
+                        issue_number: pull.data.number,
+                        milestone: inputs.milestone,
+                    });
+                }
+                catch (e) {
+                    const msg = formatOctokitError(`Failed to set milestone '${inputs.milestone}' on PR #${pull.data.number}`, e);
+                    core.error(msg);
+                    core.setFailed(msg);
+                    return;
+                }
+            }
             if (inputs.labels.length > 0) {
                 core.info(`Applying labels '${inputs.labels}'`);
                 yield octokit.rest.issues.addLabels({
