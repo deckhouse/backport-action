@@ -1,5 +1,5 @@
-import * as github from "@actions/github";
 import * as core from "@actions/core";
+import * as github from "@actions/github";
 
 export interface Inputs {
   token: string;
@@ -7,6 +7,7 @@ export interface Inputs {
   author: string;
   branch: string;
   commit: string;
+  milestone: string;
   labels: string[];
   automerge: boolean;
   mergeMethod: "merge" | "rebase" | "squash" | undefined;
@@ -16,7 +17,7 @@ export interface Inputs {
 
 export async function createPullRequest(
   inputs: Inputs,
-  prBranch: string
+  prBranch: string,
 ): Promise<void> {
   const octokit = github.getOctokit(inputs.token);
   if (process.env.GITHUB_REPOSITORY !== undefined) {
@@ -37,7 +38,7 @@ export async function createPullRequest(
     if (!title || !body) {
       if (process.env.SOURCE_PR_NUMBER) {
         core.info(
-          `Fetching title and body from source PR '${process.env.SOURCE_PR_NUMBER}'`
+          `Fetching title and body from source PR '${process.env.SOURCE_PR_NUMBER}'`,
         );
         try {
           const pull_number = parseInt(process.env.SOURCE_PR_NUMBER);
@@ -59,8 +60,8 @@ export async function createPullRequest(
     }
 
     title = "Backport: " + title;
-    core.info(`Using title '${title}'`);
-    core.info(`Using body '${body}'`);
+    //core.info(`Using title '${title}'`);
+    //core.info(`Using body '${body}'`);
 
     // Create PR
     const pull = await octokit.rest.pulls.create({
@@ -71,6 +72,18 @@ export async function createPullRequest(
       title,
       body,
     });
+
+    // Add milestone
+    core.info(`Using milestone '${inputs.milestone}'`);
+    if (inputs.milestone != null) {
+      await octokit.rest.issues.update({
+        owner: owner,
+        repo: repo,
+        issue_number: pull.data.id,
+        milestone: inputs.milestone,
+      });
+    }
+
     core.setOutput("cherry_pr_number", pull.data.number);
     core.setOutput("cherry_pr_url", pull.data.html_url);
 
@@ -115,7 +128,7 @@ export async function createPullRequest(
     if (inputs.automerge) {
       try {
         core.info(
-          `Merging PR: #${pull.data.number} with method: '${inputs.mergeMethod}'`
+          `Merging PR: #${pull.data.number} with method: '${inputs.mergeMethod}'`,
         );
         const res = await octokit.rest.pulls.merge({
           owner,
