@@ -32,7 +32,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.run = void 0;
+exports.run = run;
 const core = __importStar(require("@actions/core"));
 const io = __importStar(require("@actions/io"));
 const exec = __importStar(require("@actions/exec"));
@@ -82,8 +82,11 @@ function run() {
             }
             core.endGroup();
             core.startGroup("Push new branch to remote");
-            yield gitExec(["push", "-u", "origin", `${prBranch}`]);
+            const pushResult = yield gitExec(["push", "-u", "origin", `${prBranch}`]);
             core.endGroup();
+            if (pushResult.exitCode !== 0) {
+                throw new Error(`git push failed (exit ${pushResult.exitCode}); branch "${prBranch}" is not on the remote, so GitHub rejects head="${prBranch}" when creating the PR.\n${pushResult.stderr.trim()}`);
+            }
             core.startGroup("Opening pull request with cherry-pick");
             yield (0, helper_1.createPullRequest)(inputs, prBranch);
             core.endGroup();
@@ -93,7 +96,6 @@ function run() {
         }
     });
 }
-exports.run = run;
 function gitExec(params) {
     return __awaiter(this, void 0, void 0, function* () {
         const result = new GitOutput();

@@ -32,9 +32,10 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.createPullRequest = void 0;
+exports.createPullRequest = createPullRequest;
 const github = __importStar(require("@actions/github"));
 const core = __importStar(require("@actions/core"));
+const utils = __importStar(require("./utils"));
 function createPullRequest(inputs, prBranch) {
     return __awaiter(this, void 0, void 0, function* () {
         const octokit = github.getOctokit(inputs.token);
@@ -60,7 +61,7 @@ function createPullRequest(inputs, prBranch) {
                             title = source_pr.data.title;
                         }
                         if (!body) {
-                            body = source_pr.data.body || '';
+                            body = source_pr.data.body || "";
                         }
                     }
                     catch (e) {
@@ -71,14 +72,21 @@ function createPullRequest(inputs, prBranch) {
             title = "Backport: " + title;
             core.info(`Using title '${title}'`);
             core.info(`Using body '${body}'`);
-            const pull = yield octokit.rest.pulls.create({
-                owner,
-                repo,
-                head: prBranch,
-                base: inputs.branch,
-                title,
-                body,
-            });
+            let pull;
+            try {
+                pull = yield octokit.rest.pulls.create({
+                    owner,
+                    repo,
+                    head: prBranch,
+                    base: inputs.branch,
+                    title,
+                    body,
+                });
+            }
+            catch (e) {
+                const detail = utils.formatOctokitRequestError(e);
+                throw new Error(`Pull request create failed for ${owner}/${repo} (head="${prBranch}", base="${inputs.branch}"). ${detail}`);
+            }
             core.setOutput("cherry_pr_number", pull.data.number);
             core.setOutput("cherry_pr_url", pull.data.html_url);
             if (inputs.labels.length > 0) {
@@ -143,4 +151,3 @@ function createPullRequest(inputs, prBranch) {
         }
     });
 }
-exports.createPullRequest = createPullRequest;

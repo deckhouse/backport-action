@@ -23,19 +23,39 @@ var __importStar = (this && this.__importStar) || function (mod) {
     return result;
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.parseDisplayNameEmail = exports.getInputMergeMethod = exports.getStringAsArray = exports.getInputAsArray = void 0;
+exports.formatOctokitRequestError = formatOctokitRequestError;
+exports.getInputAsArray = getInputAsArray;
+exports.getStringAsArray = getStringAsArray;
+exports.getInputMergeMethod = getInputMergeMethod;
+exports.parseDisplayNameEmail = parseDisplayNameEmail;
 const core = __importStar(require("@actions/core"));
+function formatOctokitRequestError(err) {
+    var _a;
+    if (typeof err !== "object" || err === null) {
+        return String(err);
+    }
+    const o = err;
+    const parts = [];
+    if (typeof o.status === "number") {
+        parts.push(`HTTP ${o.status}`);
+    }
+    if (typeof o.message === "string") {
+        parts.push(o.message);
+    }
+    if (((_a = o.response) === null || _a === void 0 ? void 0 : _a.data) !== undefined) {
+        parts.push(`body: ${JSON.stringify(o.response.data)}`);
+    }
+    return parts.length > 0 ? parts.join(" | ") : String(err);
+}
 function getInputAsArray(name, options) {
     return getStringAsArray(core.getInput(name, options));
 }
-exports.getInputAsArray = getInputAsArray;
 function getStringAsArray(str) {
     return str
         .split(",")
         .map((s) => s.trim())
         .filter((x) => x !== "");
 }
-exports.getStringAsArray = getStringAsArray;
 function getInputMergeMethod(name, options) {
     const value = core.getInput(name, options);
     switch (value.trim()) {
@@ -49,7 +69,6 @@ function getInputMergeMethod(name, options) {
             return undefined;
     }
 }
-exports.getInputMergeMethod = getInputMergeMethod;
 function parseDisplayNameEmail(displayNameEmail) {
     const pattern = /^([^<]+)\s*<([^>]+)>$/i;
     const match = displayNameEmail.match(pattern);
@@ -63,4 +82,3 @@ function parseDisplayNameEmail(displayNameEmail) {
     }
     return { name, email };
 }
-exports.parseDisplayNameEmail = parseDisplayNameEmail;
