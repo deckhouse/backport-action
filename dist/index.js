@@ -39,9 +39,9 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.createPullRequest = void 0;
-const github = __importStar(__nccwpck_require__(5438));
+exports.createPullRequest = createPullRequest;
 const core = __importStar(__nccwpck_require__(2186));
+const github = __importStar(__nccwpck_require__(5438));
 function createPullRequest(inputs, prBranch) {
     return __awaiter(this, void 0, void 0, function* () {
         const octokit = github.getOctokit(inputs.token);
@@ -67,7 +67,7 @@ function createPullRequest(inputs, prBranch) {
                             title = source_pr.data.title;
                         }
                         if (!body) {
-                            body = source_pr.data.body || '';
+                            body = source_pr.data.body || "";
                         }
                     }
                     catch (e) {
@@ -76,8 +76,6 @@ function createPullRequest(inputs, prBranch) {
                 }
             }
             title = "Backport: " + title;
-            core.info(`Using title '${title}'`);
-            core.info(`Using body '${body}'`);
             const pull = yield octokit.rest.pulls.create({
                 owner,
                 repo,
@@ -86,6 +84,15 @@ function createPullRequest(inputs, prBranch) {
                 title,
                 body,
             });
+            core.info(`Using milestone '${inputs.milestone}'`);
+            if (inputs.milestone != null) {
+                yield octokit.rest.issues.update({
+                    owner: owner,
+                    repo: repo,
+                    issue_number: pull.data.id,
+                    milestone: inputs.milestone,
+                });
+            }
             core.setOutput("cherry_pr_number", pull.data.number);
             core.setOutput("cherry_pr_url", pull.data.html_url);
             if (inputs.labels.length > 0) {
@@ -150,7 +157,6 @@ function createPullRequest(inputs, prBranch) {
         }
     });
 }
-exports.createPullRequest = createPullRequest;
 
 
 /***/ }),
@@ -193,7 +199,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.run = void 0;
+exports.run = run;
 const core = __importStar(__nccwpck_require__(2186));
 const io = __importStar(__nccwpck_require__(7436));
 const exec = __importStar(__nccwpck_require__(1514));
@@ -209,6 +215,7 @@ function run() {
                 author: core.getInput("author"),
                 branch: core.getInput("branch"),
                 commit: core.getInput("commit"),
+                milestone: core.getInput("milestone"),
                 labels: utils.getInputAsArray("labels"),
                 automerge: core.getBooleanInput("automerge"),
                 mergeMethod: utils.getInputMergeMethod("merge_method"),
@@ -254,7 +261,6 @@ function run() {
         }
     });
 }
-exports.run = run;
 function gitExec(params) {
     return __awaiter(this, void 0, void 0, function* () {
         const result = new GitOutput();
@@ -325,19 +331,20 @@ var __importStar = (this && this.__importStar) || function (mod) {
     return result;
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.parseDisplayNameEmail = exports.getInputMergeMethod = exports.getStringAsArray = exports.getInputAsArray = void 0;
+exports.getInputAsArray = getInputAsArray;
+exports.getStringAsArray = getStringAsArray;
+exports.getInputMergeMethod = getInputMergeMethod;
+exports.parseDisplayNameEmail = parseDisplayNameEmail;
 const core = __importStar(__nccwpck_require__(2186));
 function getInputAsArray(name, options) {
     return getStringAsArray(core.getInput(name, options));
 }
-exports.getInputAsArray = getInputAsArray;
 function getStringAsArray(str) {
     return str
         .split(",")
         .map((s) => s.trim())
         .filter((x) => x !== "");
 }
-exports.getStringAsArray = getStringAsArray;
 function getInputMergeMethod(name, options) {
     const value = core.getInput(name, options);
     switch (value.trim()) {
@@ -351,7 +358,6 @@ function getInputMergeMethod(name, options) {
             return undefined;
     }
 }
-exports.getInputMergeMethod = getInputMergeMethod;
 function parseDisplayNameEmail(displayNameEmail) {
     const pattern = /^([^<]+)\s*<([^>]+)>$/i;
     const match = displayNameEmail.match(pattern);
@@ -365,7 +371,6 @@ function parseDisplayNameEmail(displayNameEmail) {
     }
     return { name, email };
 }
-exports.parseDisplayNameEmail = parseDisplayNameEmail;
 
 
 /***/ }),

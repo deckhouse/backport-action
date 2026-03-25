@@ -32,7 +32,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.run = void 0;
+exports.run = run;
 const core = __importStar(require("@actions/core"));
 const io = __importStar(require("@actions/io"));
 const exec = __importStar(require("@actions/exec"));
@@ -48,6 +48,7 @@ function run() {
                 author: core.getInput("author"),
                 branch: core.getInput("branch"),
                 commit: core.getInput("commit"),
+                milestone: core.getInput("milestone"),
                 labels: utils.getInputAsArray("labels"),
                 automerge: core.getBooleanInput("automerge"),
                 mergeMethod: utils.getInputMergeMethod("merge_method"),
@@ -93,7 +94,6 @@ function run() {
         }
     });
 }
-exports.run = run;
 function gitExec(params) {
     return __awaiter(this, void 0, void 0, function* () {
         const result = new GitOutput();

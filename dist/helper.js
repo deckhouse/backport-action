@@ -32,9 +32,9 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.createPullRequest = void 0;
-const github = __importStar(require("@actions/github"));
+exports.createPullRequest = createPullRequest;
 const core = __importStar(require("@actions/core"));
+const github = __importStar(require("@actions/github"));
 function createPullRequest(inputs, prBranch) {
     return __awaiter(this, void 0, void 0, function* () {
         const octokit = github.getOctokit(inputs.token);
@@ -60,7 +60,7 @@ function createPullRequest(inputs, prBranch) {
                             title = source_pr.data.title;
                         }
                         if (!body) {
-                            body = source_pr.data.body || '';
+                            body = source_pr.data.body || "";
                         }
                     }
                     catch (e) {
@@ -69,8 +69,6 @@ function createPullRequest(inputs, prBranch) {
                 }
             }
             title = "Backport: " + title;
-            core.info(`Using title '${title}'`);
-            core.info(`Using body '${body}'`);
             const pull = yield octokit.rest.pulls.create({
                 owner,
                 repo,
@@ -79,6 +77,15 @@ function createPullRequest(inputs, prBranch) {
                 title,
                 body,
             });
+            core.info(`Using milestone '${inputs.milestone}'`);
+            if (inputs.milestone != null) {
+                yield octokit.rest.issues.update({
+                    owner: owner,
+                    repo: repo,
+                    issue_number: pull.data.id,
+                    milestone: inputs.milestone,
+                });
+            }
             core.setOutput("cherry_pr_number", pull.data.number);
             core.setOutput("cherry_pr_url", pull.data.html_url);
             if (inputs.labels.length > 0) {
@@ -143,4 +150,3 @@ function createPullRequest(inputs, prBranch) {
         }
     });
 }
-exports.createPullRequest = createPullRequest;
