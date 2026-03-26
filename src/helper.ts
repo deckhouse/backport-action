@@ -266,7 +266,7 @@ export async function createPullRequest(
           }
         }
       } catch (e: any) {
-        const msg = `Failure: Cherry pick [PR](${pull.data.html_url}) was created but cannot be merged`;
+        const msg = `Failure ⚠️: Cherry pick [PR](${pull.data.html_url}) was created but cannot be merged`;
         const detailedMsg =
           "Cherry-pick PR was created but cannot be merged: " + e;
         core.setOutput("error_message", msg);
