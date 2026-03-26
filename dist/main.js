@@ -41,7 +41,7 @@ const github = __importStar(require("@actions/github"));
 const helper_1 = require("./helper");
 const CHERRYPICK_EMPTY = "The previous cherry-pick is now empty, possibly due to conflict resolution.";
 const GIT_PUSH_WORKFLOW_CHECK_TIMEOUT = "due to timeout";
-const GIT_PUSH_MAX_ATTEMPTS = 10;
+const GIT_PUSH_MAX_ATTEMPTS = 50;
 const GIT_PUSH_RETRY_DELAY_MS = 5000;
 function isGithubWorkflowPushTimeout(stderr) {
     return stderr.toLowerCase().includes(GIT_PUSH_WORKFLOW_CHECK_TIMEOUT);

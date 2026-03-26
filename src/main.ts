@@ -11,7 +11,7 @@ const CHERRYPICK_EMPTY =
 
 /** GitHub may reject push while checking workflow updates; transient server timeouts mention this phrase. */
 const GIT_PUSH_WORKFLOW_CHECK_TIMEOUT = "due to timeout";
-const GIT_PUSH_MAX_ATTEMPTS = 10;
+const GIT_PUSH_MAX_ATTEMPTS = 50;
 const GIT_PUSH_RETRY_DELAY_MS = 5000;
 
 function isGithubWorkflowPushTimeout(stderr: string): boolean {
