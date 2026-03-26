@@ -40,6 +40,53 @@ const utils = __importStar(require("./utils"));
 const github = __importStar(require("@actions/github"));
 const helper_1 = require("./helper");
 const CHERRYPICK_EMPTY = "The previous cherry-pick is now empty, possibly due to conflict resolution.";
+const GIT_PUSH_WORKFLOW_CHECK_TIMEOUT = "due to timeout";
+const GIT_PUSH_MAX_ATTEMPTS = 10;
+const GIT_PUSH_RETRY_DELAY_MS = 5000;
+function isGithubWorkflowPushTimeout(stderr) {
+    return stderr.toLowerCase().includes(GIT_PUSH_WORKFLOW_CHECK_TIMEOUT);
+}
+function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+function logPushPayloadVsBase(branch) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const baseRef = `origin/${branch}`;
+        const range = `${baseRef}..HEAD`;
+        const commits = yield gitExec(["log", "--oneline", "--no-decorate", range], {
+            quiet: true,
+        });
+        const names = yield gitExec(["diff", "--name-only", `${baseRef}...HEAD`], { quiet: true });
+        if (commits.exitCode !== 0) {
+            core.warning(`Could not list commits (${baseRef}..HEAD): ${commits.stderr.trim()}`);
+        }
+        if (names.exitCode !== 0) {
+            core.warning(`Could not list changed files (${baseRef}...HEAD): ${names.stderr.trim()}`);
+        }
+        core.info(`Commits on branch not in ${baseRef}:`);
+        core.info(commits.stdout.trim() || "(none)");
+        core.info(`Files changed vs merge-base (${baseRef}...HEAD):`);
+        const paths = names.stdout
+            .split("\n")
+            .map((p) => p.trim())
+            .filter(Boolean);
+        if (paths.length === 0) {
+            core.info("(none — unexpected before push)");
+        }
+        else {
+            core.info(paths.join("\n"));
+        }
+        const workflowPaths = paths.filter((p) => p.startsWith(".github/workflows/"));
+        if (workflowPaths.length > 0) {
+            core.warning(`Push touches ${workflowPaths.length} workflow file(s). GitHub runs extra checks on the server; ` +
+                `"due to timeout" or workflows scope errors are common here. Use a token with Workflows permission or split workflow changes from the backport.`);
+            core.info(`Workflow paths: ${workflowPaths.join(", ")}`);
+        }
+        else if (paths.length > 0 && names.exitCode === 0) {
+            core.info("No `.github/workflows/` paths in this diff; if push still fails with a workflow/timeout message, it can be a transient GitHub check or missing Workflows token scope anyway.");
+        }
+    });
+}
 function run() {
     return __awaiter(this, void 0, void 0, function* () {
         try {
@@ -82,8 +129,23 @@ function run() {
             }
             core.endGroup();
             core.startGroup("Push new branch to remote");
-            yield gitExec(["push", "-u", "origin", `${prBranch}`]);
+            core.startGroup("What will be pushed (vs target branch)");
+            yield logPushPayloadVsBase(inputs.branch);
             core.endGroup();
+            let pushResult = yield gitExec(["push", "-u", "origin", `${prBranch}`], { liveOutput: true });
+            let pushAttempt = 1;
+            while (pushResult.exitCode !== 0 &&
+                pushAttempt < GIT_PUSH_MAX_ATTEMPTS &&
+                isGithubWorkflowPushTimeout(pushResult.stderr)) {
+                core.warning(`git push failed (attempt ${pushAttempt}/${GIT_PUSH_MAX_ATTEMPTS}): workflow check timed out on GitHub; retrying in ${GIT_PUSH_RETRY_DELAY_MS / 1000}s`);
+                yield sleep(GIT_PUSH_RETRY_DELAY_MS);
+                pushAttempt++;
+                pushResult = yield gitExec(["push", "-u", "origin", `${prBranch}`], { liveOutput: true });
+            }
+            core.endGroup();
+            if (pushResult.exitCode !== 0) {
+                throw new Error(`git push failed (exit ${pushResult.exitCode}); branch "${prBranch}" is not on the remote, so GitHub rejects head="${prBranch}" when creating the PR.\n${pushResult.stderr.trim()}`);
+            }
             core.startGroup("Opening pull request with cherry-pick");
             yield (0, helper_1.createPullRequest)(inputs, prBranch);
             core.endGroup();
@@ -93,19 +155,29 @@ function run() {
         }
     });
 }
-function gitExec(params) {
+function gitExec(params, execOpts) {
     return __awaiter(this, void 0, void 0, function* () {
         const result = new GitOutput();
         const stdout = [];
         const stderr = [];
+        if (!(execOpts === null || execOpts === void 0 ? void 0 : execOpts.quiet)) {
+            core.info(`git argv: ${JSON.stringify(params)}`);
+        }
+        const started = Date.now();
         const options = {
             ignoreReturnCode: true,
             listeners: {
                 stdout: (data) => {
                     stdout.push(data.toString());
+                    if (execOpts === null || execOpts === void 0 ? void 0 : execOpts.liveOutput) {
+                        process.stdout.write(data);
+                    }
                 },
                 stderr: (data) => {
                     stderr.push(data.toString());
+                    if (execOpts === null || execOpts === void 0 ? void 0 : execOpts.liveOutput) {
+                        process.stderr.write(data);
+                    }
                 },
             },
         };
@@ -113,11 +185,27 @@ function gitExec(params) {
         result.exitCode = yield exec.exec(gitPath, params, options);
         result.stdout = stdout.join("");
         result.stderr = stderr.join("");
+        const elapsedMs = Date.now() - started;
+        if (!(execOpts === null || execOpts === void 0 ? void 0 : execOpts.quiet)) {
+            core.info(`git finished in ${elapsedMs}ms, exit code ${result.exitCode}, cwd ${process.cwd()}`);
+        }
         if (result.exitCode === 0) {
-            core.info(result.stdout.trim());
+            if (!(execOpts === null || execOpts === void 0 ? void 0 : execOpts.quiet) &&
+                !(execOpts === null || execOpts === void 0 ? void 0 : execOpts.liveOutput) &&
+                result.stdout.trim()) {
+                core.info(result.stdout.trim());
+            }
         }
         else {
-            core.info(result.stderr.trim());
+            if (execOpts === null || execOpts === void 0 ? void 0 : execOpts.liveOutput) {
+                core.info(`git stderr was streamed above (${result.stderr.length} bytes); stdout ${result.stdout.length} bytes`);
+            }
+            else {
+                core.info(`--- git stderr (${result.stderr.length} bytes) ---`);
+                core.info(result.stderr.trim() || "(empty)");
+                core.info(`--- git stdout (${result.stdout.length} bytes) ---`);
+                core.info(result.stdout.trim() || "(empty)");
+            }
         }
         return result;
     });
