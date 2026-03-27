@@ -294,11 +294,33 @@ function isGithubWorkflowPushTimeout(stderr) {
 function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
-function originUrlWithToken(token) {
+function httpsOriginUrlNoCredentials() {
     const { owner, repo } = github.context.repo;
-    const base = process.env.GITHUB_SERVER_URL || "https://github.com";
-    const { host } = new URL(base.endsWith("/") ? base.slice(0, -1) : base);
-    return `https://x-access-token:${token}@${host}/${owner}/${repo}.git`;
+    const baseStr = process.env.GITHUB_SERVER_URL || "https://github.com";
+    const u = new URL(baseStr.endsWith("/") ? baseStr.slice(0, -1) : baseStr);
+    const pathPrefix = (u.pathname || "").replace(/\/$/, "");
+    return `${u.origin}${pathPrefix}/${owner}/${repo}.git`;
+}
+function serverBroadExtraHeaderKey() {
+    const baseStr = process.env.GITHUB_SERVER_URL || "https://github.com";
+    const u = new URL(baseStr.endsWith("/") ? baseStr.slice(0, -1) : baseStr);
+    const proto = u.protocol.replace(/:$/, "");
+    return `http.${proto}://${u.host}/.extraheader`;
+}
+function configureGitHttpAuth(token) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const repoUrl = httpsOriginUrlNoCredentials();
+        const broadKey = serverBroadExtraHeaderKey();
+        yield gitExec(["config", "--local", "--unset-all", broadKey], {
+            quiet: true,
+            ignoreFailureLog: true,
+        });
+        const extraHeaderKey = `http.${repoUrl}/.extraheader`;
+        const basic = Buffer.from(`x-access-token:${token}`, "utf8").toString("base64");
+        const headerValue = `AUTHORIZATION: basic ${basic}`;
+        yield gitExec(["remote", "set-url", "origin", repoUrl]);
+        yield gitExec(["config", "--local", extraHeaderKey, headerValue]);
+    });
 }
 function logPushPayloadVsBase(branch) {
     return __awaiter(this, void 0, void 0, function* () {
@@ -357,8 +379,8 @@ function run() {
             if (inputs.token) {
                 core.setSecret(inputs.token);
             }
-            core.startGroup("Point origin at repo using action token");
-            yield gitExec(["remote", "set-url", "origin", originUrlWithToken(inputs.token)]);
+            core.startGroup("Configure git HTTP auth for origin (action token)");
+            yield configureGitHttpAuth(inputs.token);
             core.endGroup();
             const githubSha = inputs.commit || process.env.GITHUB_SHA;
             const prBranch = `cherry-pick-${inputs.branch}-${githubSha}`;
@@ -454,7 +476,9 @@ function gitExec(params, execOpts) {
             }
         }
         else {
-            if (execOpts === null || execOpts === void 0 ? void 0 : execOpts.liveOutput) {
+            if ((execOpts === null || execOpts === void 0 ? void 0 : execOpts.ignoreFailureLog) && (execOpts === null || execOpts === void 0 ? void 0 : execOpts.quiet)) {
+            }
+            else if (execOpts === null || execOpts === void 0 ? void 0 : execOpts.liveOutput) {
                 core.info(`git stderr was streamed above (${result.stderr.length} bytes); stdout ${result.stdout.length} bytes`);
             }
             else {

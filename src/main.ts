@@ -22,12 +22,45 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/** HTTPS URL so fetch/push use the same token as Octokit (checkout often leaves `origin` on default GITHUB_TOKEN only). */
-function originUrlWithToken(token: string): string {
+/** Public clone URL for this repo (no credentials). */
+function httpsOriginUrlNoCredentials(): string {
   const { owner, repo } = github.context.repo;
-  const base = process.env.GITHUB_SERVER_URL || "https://github.com";
-  const { host } = new URL(base.endsWith("/") ? base.slice(0, -1) : base);
-  return `https://x-access-token:${token}@${host}/${owner}/${repo}.git`;
+  const baseStr = process.env.GITHUB_SERVER_URL || "https://github.com";
+  const u = new URL(baseStr.endsWith("/") ? baseStr.slice(0, -1) : baseStr);
+  const pathPrefix = (u.pathname || "").replace(/\/$/, "");
+  return `${u.origin}${pathPrefix}/${owner}/${repo}.git`;
+}
+
+function serverBroadExtraHeaderKey(): string {
+  const baseStr = process.env.GITHUB_SERVER_URL || "https://github.com";
+  const u = new URL(baseStr.endsWith("/") ? baseStr.slice(0, -1) : baseStr);
+  const proto = u.protocol.replace(/:$/, "");
+  return `http.${proto}://${u.host}/.extraheader`;
+}
+
+/**
+ * Make fetch/push use `token` when checkout set a host-wide extraheader with
+ * GITHUB_TOKEN. If we only add a repo-specific header, Git sends both
+ * Authorization headers and GitHub responds with 400 Duplicate header.
+ * Drop the broad key first, then set the repo-scoped one.
+ * See https://github.com/actions/checkout/issues/162
+ */
+async function configureGitHttpAuth(token: string): Promise<void> {
+  const repoUrl = httpsOriginUrlNoCredentials();
+  const broadKey = serverBroadExtraHeaderKey();
+  await gitExec(["config", "--local", "--unset-all", broadKey], {
+    quiet: true,
+    ignoreFailureLog: true,
+  });
+
+  const extraHeaderKey = `http.${repoUrl}/.extraheader`;
+  const basic = Buffer.from(`x-access-token:${token}`, "utf8").toString(
+    "base64",
+  );
+  const headerValue = `AUTHORIZATION: basic ${basic}`;
+
+  await gitExec(["remote", "set-url", "origin", repoUrl]);
+  await gitExec(["config", "--local", extraHeaderKey, headerValue]);
 }
 
 /** Files in this push vs `origin/<branch>`; explains GitHub workflow validation on push. */
@@ -104,8 +137,8 @@ export async function run(): Promise<void> {
       core.setSecret(inputs.token);
     }
 
-    core.startGroup("Point origin at repo using action token");
-    await gitExec(["remote", "set-url", "origin", originUrlWithToken(inputs.token)]);
+    core.startGroup("Configure git HTTP auth for origin (action token)");
+    await configureGitHttpAuth(inputs.token);
     core.endGroup();
 
     const githubSha = inputs.commit || process.env.GITHUB_SHA;
@@ -191,6 +224,8 @@ type GitExecOptions = {
   liveOutput?: boolean;
   /** No argv/duration/success logs (for nested diagnostic git calls). */
   quiet?: boolean;
+  /** With `quiet`, do not log stderr/stdout dumps when exit code is non-zero (optional git config unset). */
+  ignoreFailureLog?: boolean;
 };
 
 async function gitExec(
@@ -245,7 +280,9 @@ async function gitExec(
       core.info(result.stdout.trim());
     }
   } else {
-    if (execOpts?.liveOutput) {
+    if (execOpts?.ignoreFailureLog && execOpts?.quiet) {
+      // e.g. git config --unset-all when key is absent (exit 5)
+    } else if (execOpts?.liveOutput) {
       core.info(
         `git stderr was streamed above (${result.stderr.length} bytes); stdout ${result.stdout.length} bytes`
       );
