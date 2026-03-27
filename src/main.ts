@@ -22,6 +22,14 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/** HTTPS URL so fetch/push use the same token as Octokit (checkout often leaves `origin` on default GITHUB_TOKEN only). */
+function originUrlWithToken(token: string): string {
+  const { owner, repo } = github.context.repo;
+  const base = process.env.GITHUB_SERVER_URL || "https://github.com";
+  const { host } = new URL(base.endsWith("/") ? base.slice(0, -1) : base);
+  return `https://x-access-token:${token}@${host}/${owner}/${repo}.git`;
+}
+
 /** Files in this push vs `origin/<branch>`; explains GitHub workflow validation on push. */
 async function logPushPayloadVsBase(branch: string): Promise<void> {
   const baseRef = `origin/${branch}`;
@@ -91,6 +99,14 @@ export async function run(): Promise<void> {
     };
 
     core.info(`Cherry pick into branch ${inputs.branch}!`);
+
+    if (inputs.token) {
+      core.setSecret(inputs.token);
+    }
+
+    core.startGroup("Point origin at repo using action token");
+    await gitExec(["remote", "set-url", "origin", originUrlWithToken(inputs.token)]);
+    core.endGroup();
 
     const githubSha = inputs.commit || process.env.GITHUB_SHA;
     const prBranch = `cherry-pick-${inputs.branch}-${githubSha}`;

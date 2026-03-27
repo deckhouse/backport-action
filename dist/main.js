@@ -49,6 +49,12 @@ function isGithubWorkflowPushTimeout(stderr) {
 function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
+function originUrlWithToken(token) {
+    const { owner, repo } = github.context.repo;
+    const base = process.env.GITHUB_SERVER_URL || "https://github.com";
+    const { host } = new URL(base.endsWith("/") ? base.slice(0, -1) : base);
+    return `https://x-access-token:${token}@${host}/${owner}/${repo}.git`;
+}
 function logPushPayloadVsBase(branch) {
     return __awaiter(this, void 0, void 0, function* () {
         const baseRef = `origin/${branch}`;
@@ -103,6 +109,12 @@ function run() {
                 committer: core.getInput("committer"),
             };
             core.info(`Cherry pick into branch ${inputs.branch}!`);
+            if (inputs.token) {
+                core.setSecret(inputs.token);
+            }
+            core.startGroup("Point origin at repo using action token");
+            yield gitExec(["remote", "set-url", "origin", originUrlWithToken(inputs.token)]);
+            core.endGroup();
             const githubSha = inputs.commit || process.env.GITHUB_SHA;
             const prBranch = `cherry-pick-${inputs.branch}-${githubSha}`;
             core.startGroup("Configuring the committer and author");
