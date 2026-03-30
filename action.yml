@@ -2,7 +2,12 @@ name: "Cherry pick backport"
 description: "GitHub action for cherry pick commits from Pull Requests into Release branches"
 inputs:
   token:
-    description: "GITHUB_TOKEN or a `repo` scoped Personal Access Token (PAT)"
+    description: >
+      Token for GitHub API and for git fetch/push. Prefer the same value as actions/checkout `token`.
+      If checkout used default GITHUB_TOKEN, it sets a global HTTP Authorization header that overrides
+      credentials in the remote URL; this action sets a repo-specific header so your token is actually used.
+      For pushes touching `.github/workflows/`: classic PAT needs `workflow` scope; fine-grained PAT needs
+      repository "Workflows" read/write; GITHUB_TOKEN needs job permissions `workflows: write` (and `contents: write`).
     default: ${{ github.token }}
     required: false
   committer:

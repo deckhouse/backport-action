@@ -38,10 +38,84 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
+var __asyncValues = (this && this.__asyncValues) || function (o) {
+    if (!Symbol.asyncIterator) throw new TypeError("Symbol.asyncIterator is not defined.");
+    var m = o[Symbol.asyncIterator], i;
+    return m ? m.call(o) : (o = typeof __values === "function" ? __values(o) : o[Symbol.iterator](), i = {}, verb("next"), verb("throw"), verb("return"), i[Symbol.asyncIterator] = function () { return this; }, i);
+    function verb(n) { i[n] = o[n] && function (v) { return new Promise(function (resolve, reject) { v = o[n](v), settle(resolve, reject, v.done, v.value); }); }; }
+    function settle(resolve, reject, d, v) { Promise.resolve(v).then(function(v) { resolve({ value: v, done: d }); }, reject); }
+};
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.createPullRequest = void 0;
-const github = __importStar(__nccwpck_require__(5438));
+exports.createPullRequest = createPullRequest;
 const core = __importStar(__nccwpck_require__(2186));
+const github = __importStar(__nccwpck_require__(5438));
+function releaseVersionPrefixFromBranch(branch) {
+    const m = branch.trim().match(/^release-(\d+\.\d+)$/i);
+    return m ? m[1] : null;
+}
+function parseThreePartVersion(title) {
+    const t = title.trim().replace(/^v/i, "");
+    const m = t.match(/^(\d+)\.(\d+)\.(\d+)$/);
+    if (!m)
+        return null;
+    return [parseInt(m[1], 10), parseInt(m[2], 10), parseInt(m[3], 10)];
+}
+function compareSemverTriple(a, b) {
+    for (let i = 0; i < 3; i++) {
+        if (a[i] !== b[i])
+            return a[i] - b[i];
+    }
+    return 0;
+}
+function listOpenMilestonesForReleaseBranch(octokit, owner, repo, branch) {
+    return __awaiter(this, void 0, void 0, function* () {
+        var _a, e_1, _b, _c;
+        const prefix = releaseVersionPrefixFromBranch(branch);
+        if (!prefix)
+            return [];
+        const [wantMajor, wantMinor] = prefix.split(".").map((x) => parseInt(x, 10));
+        const out = [];
+        try {
+            for (var _d = true, _e = __asyncValues(octokit.paginate.iterator(octokit.rest.issues.listMilestones, {
+                owner,
+                repo,
+                state: "open",
+                per_page: 100,
+            })), _f; _f = yield _e.next(), _a = _f.done, !_a; _d = true) {
+                _c = _f.value;
+                _d = false;
+                const { data: milestones } = _c;
+                for (const m of milestones) {
+                    if (m.number == null || !m.title)
+                        continue;
+                    const triple = parseThreePartVersion(m.title);
+                    if (!triple)
+                        continue;
+                    const [maj, min] = triple;
+                    if (maj !== wantMajor || min !== wantMinor)
+                        continue;
+                    out.push({ number: m.number, title: m.title });
+                }
+            }
+        }
+        catch (e_1_1) { e_1 = { error: e_1_1 }; }
+        finally {
+            try {
+                if (!_d && !_a && (_b = _e.return)) yield _b.call(_e);
+            }
+            finally { if (e_1) throw e_1.error; }
+        }
+        out.sort((x, y) => compareSemverTriple(parseThreePartVersion(x.title), parseThreePartVersion(y.title)));
+        return out;
+    });
+}
+function getFirstOpenMilestoneNumberForReleaseBranch(octokit, owner, repo, branch) {
+    return __awaiter(this, void 0, void 0, function* () {
+        var _a, _b;
+        const list = yield listOpenMilestonesForReleaseBranch(octokit, owner, repo, branch);
+        return (_b = (_a = list[0]) === null || _a === void 0 ? void 0 : _a.number) !== null && _b !== void 0 ? _b : null;
+    });
+}
 function createPullRequest(inputs, prBranch) {
     return __awaiter(this, void 0, void 0, function* () {
         const octokit = github.getOctokit(inputs.token);
@@ -67,7 +141,7 @@ function createPullRequest(inputs, prBranch) {
                             title = source_pr.data.title;
                         }
                         if (!body) {
-                            body = source_pr.data.body || '';
+                            body = source_pr.data.body || "";
                         }
                     }
                     catch (e) {
@@ -76,8 +150,6 @@ function createPullRequest(inputs, prBranch) {
                 }
             }
             title = "Backport: " + title;
-            core.info(`Using title '${title}'`);
-            core.info(`Using body '${body}'`);
             const pull = yield octokit.rest.pulls.create({
                 owner,
                 repo,
@@ -88,6 +160,19 @@ function createPullRequest(inputs, prBranch) {
             });
             core.setOutput("cherry_pr_number", pull.data.number);
             core.setOutput("cherry_pr_url", pull.data.html_url);
+            let milestoneNumber = null;
+            if (releaseVersionPrefixFromBranch(inputs.branch) != null) {
+                milestoneNumber = yield getFirstOpenMilestoneNumberForReleaseBranch(octokit, owner, repo, inputs.branch);
+                if (milestoneNumber != null) {
+                    core.info(`Setting milestone #${milestoneNumber} on PR #${pull.data.number}`);
+                    yield octokit.rest.issues.update({
+                        owner,
+                        repo,
+                        issue_number: pull.data.number,
+                        milestone: milestoneNumber,
+                    });
+                }
+            }
             if (inputs.labels.length > 0) {
                 core.info(`Applying labels '${inputs.labels}'`);
                 yield octokit.rest.issues.addLabels({
@@ -139,7 +224,7 @@ function createPullRequest(inputs, prBranch) {
                     }
                 }
                 catch (e) {
-                    const msg = `Failure: Cherry pick [PR](${pull.data.html_url}) was created but cannot be merged`;
+                    const msg = `Failure ⚠️: Cherry pick [PR](${pull.data.html_url}) was created but cannot be merged`;
                     const detailedMsg = "Cherry-pick PR was created but cannot be merged: " + e;
                     core.setOutput("error_message", msg);
                     core.error(detailedMsg);
@@ -150,7 +235,6 @@ function createPullRequest(inputs, prBranch) {
         }
     });
 }
-exports.createPullRequest = createPullRequest;
 
 
 /***/ }),
@@ -193,7 +277,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.run = void 0;
+exports.run = run;
 const core = __importStar(__nccwpck_require__(2186));
 const io = __importStar(__nccwpck_require__(7436));
 const exec = __importStar(__nccwpck_require__(1514));
@@ -201,6 +285,81 @@ const utils = __importStar(__nccwpck_require__(4729));
 const github = __importStar(__nccwpck_require__(5438));
 const helper_1 = __nccwpck_require__(8358);
 const CHERRYPICK_EMPTY = "The previous cherry-pick is now empty, possibly due to conflict resolution.";
+const GIT_PUSH_WORKFLOW_CHECK_TIMEOUT = "due to timeout";
+const GIT_PUSH_MAX_ATTEMPTS = 50;
+const GIT_PUSH_RETRY_DELAY_MS = 5000;
+function isGithubWorkflowPushTimeout(stderr) {
+    return stderr.toLowerCase().includes(GIT_PUSH_WORKFLOW_CHECK_TIMEOUT);
+}
+function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+function httpsOriginUrlNoCredentials() {
+    const { owner, repo } = github.context.repo;
+    const baseStr = process.env.GITHUB_SERVER_URL || "https://github.com";
+    const u = new URL(baseStr.endsWith("/") ? baseStr.slice(0, -1) : baseStr);
+    const pathPrefix = (u.pathname || "").replace(/\/$/, "");
+    return `${u.origin}${pathPrefix}/${owner}/${repo}.git`;
+}
+function serverBroadExtraHeaderKey() {
+    const baseStr = process.env.GITHUB_SERVER_URL || "https://github.com";
+    const u = new URL(baseStr.endsWith("/") ? baseStr.slice(0, -1) : baseStr);
+    const proto = u.protocol.replace(/:$/, "");
+    return `http.${proto}://${u.host}/.extraheader`;
+}
+function configureGitHttpAuth(token) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const repoUrl = httpsOriginUrlNoCredentials();
+        const broadKey = serverBroadExtraHeaderKey();
+        yield gitExec(["config", "--local", "--unset-all", broadKey], {
+            quiet: true,
+            ignoreFailureLog: true,
+        });
+        const extraHeaderKey = `http.${repoUrl}/.extraheader`;
+        const basic = Buffer.from(`x-access-token:${token}`, "utf8").toString("base64");
+        const headerValue = `AUTHORIZATION: basic ${basic}`;
+        yield gitExec(["remote", "set-url", "origin", repoUrl]);
+        yield gitExec(["config", "--local", extraHeaderKey, headerValue]);
+    });
+}
+function logPushPayloadVsBase(branch) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const baseRef = `origin/${branch}`;
+        const range = `${baseRef}..HEAD`;
+        const commits = yield gitExec(["log", "--oneline", "--no-decorate", range], {
+            quiet: true,
+        });
+        const names = yield gitExec(["diff", "--name-only", `${baseRef}...HEAD`], { quiet: true });
+        if (commits.exitCode !== 0) {
+            core.warning(`Could not list commits (${baseRef}..HEAD): ${commits.stderr.trim()}`);
+        }
+        if (names.exitCode !== 0) {
+            core.warning(`Could not list changed files (${baseRef}...HEAD): ${names.stderr.trim()}`);
+        }
+        core.info(`Commits on branch not in ${baseRef}:`);
+        core.info(commits.stdout.trim() || "(none)");
+        core.info(`Files changed vs merge-base (${baseRef}...HEAD):`);
+        const paths = names.stdout
+            .split("\n")
+            .map((p) => p.trim())
+            .filter(Boolean);
+        if (paths.length === 0) {
+            core.info("(none — unexpected before push)");
+        }
+        else {
+            core.info(paths.join("\n"));
+        }
+        const workflowPaths = paths.filter((p) => p.startsWith(".github/workflows/"));
+        if (workflowPaths.length > 0) {
+            core.warning(`Push touches ${workflowPaths.length} workflow file(s). GitHub runs extra checks on the server; ` +
+                `"due to timeout" or workflows scope errors are common here. Use a token with Workflows permission or split workflow changes from the backport.`);
+            core.info(`Workflow paths: ${workflowPaths.join(", ")}`);
+        }
+        else if (paths.length > 0 && names.exitCode === 0) {
+            core.info("No `.github/workflows/` paths in this diff; if push still fails with a workflow/timeout message, it can be a transient GitHub check or missing Workflows token scope anyway.");
+        }
+    });
+}
 function run() {
     return __awaiter(this, void 0, void 0, function* () {
         try {
@@ -217,6 +376,12 @@ function run() {
                 committer: core.getInput("committer"),
             };
             core.info(`Cherry pick into branch ${inputs.branch}!`);
+            if (inputs.token) {
+                core.setSecret(inputs.token);
+            }
+            core.startGroup("Configure git HTTP auth for origin (action token)");
+            yield configureGitHttpAuth(inputs.token);
+            core.endGroup();
             const githubSha = inputs.commit || process.env.GITHUB_SHA;
             const prBranch = `cherry-pick-${inputs.branch}-${githubSha}`;
             core.startGroup("Configuring the committer and author");
@@ -243,8 +408,23 @@ function run() {
             }
             core.endGroup();
             core.startGroup("Push new branch to remote");
-            yield gitExec(["push", "-u", "origin", `${prBranch}`]);
+            core.startGroup("What will be pushed (vs target branch)");
+            yield logPushPayloadVsBase(inputs.branch);
             core.endGroup();
+            let pushResult = yield gitExec(["push", "-u", "origin", `${prBranch}`], { liveOutput: true });
+            let pushAttempt = 1;
+            while (pushResult.exitCode !== 0 &&
+                pushAttempt < GIT_PUSH_MAX_ATTEMPTS &&
+                isGithubWorkflowPushTimeout(pushResult.stderr)) {
+                core.warning(`git push failed (attempt ${pushAttempt}/${GIT_PUSH_MAX_ATTEMPTS}): workflow check timed out on GitHub; retrying in ${GIT_PUSH_RETRY_DELAY_MS / 1000}s`);
+                yield sleep(GIT_PUSH_RETRY_DELAY_MS);
+                pushAttempt++;
+                pushResult = yield gitExec(["push", "-u", "origin", `${prBranch}`], { liveOutput: true });
+            }
+            core.endGroup();
+            if (pushResult.exitCode !== 0) {
+                throw new Error(`git push failed (exit ${pushResult.exitCode}); branch "${prBranch}" is not on the remote, so GitHub rejects head="${prBranch}" when creating the PR.\n${pushResult.stderr.trim()}`);
+            }
             core.startGroup("Opening pull request with cherry-pick");
             yield (0, helper_1.createPullRequest)(inputs, prBranch);
             core.endGroup();
@@ -254,20 +434,29 @@ function run() {
         }
     });
 }
-exports.run = run;
-function gitExec(params) {
+function gitExec(params, execOpts) {
     return __awaiter(this, void 0, void 0, function* () {
         const result = new GitOutput();
         const stdout = [];
         const stderr = [];
+        if (!(execOpts === null || execOpts === void 0 ? void 0 : execOpts.quiet)) {
+            core.info(`git argv: ${JSON.stringify(params)}`);
+        }
+        const started = Date.now();
         const options = {
             ignoreReturnCode: true,
             listeners: {
                 stdout: (data) => {
                     stdout.push(data.toString());
+                    if (execOpts === null || execOpts === void 0 ? void 0 : execOpts.liveOutput) {
+                        process.stdout.write(data);
+                    }
                 },
                 stderr: (data) => {
                     stderr.push(data.toString());
+                    if (execOpts === null || execOpts === void 0 ? void 0 : execOpts.liveOutput) {
+                        process.stderr.write(data);
+                    }
                 },
             },
         };
@@ -275,11 +464,29 @@ function gitExec(params) {
         result.exitCode = yield exec.exec(gitPath, params, options);
         result.stdout = stdout.join("");
         result.stderr = stderr.join("");
+        const elapsedMs = Date.now() - started;
+        if (!(execOpts === null || execOpts === void 0 ? void 0 : execOpts.quiet)) {
+            core.info(`git finished in ${elapsedMs}ms, exit code ${result.exitCode}, cwd ${process.cwd()}`);
+        }
         if (result.exitCode === 0) {
-            core.info(result.stdout.trim());
+            if (!(execOpts === null || execOpts === void 0 ? void 0 : execOpts.quiet) &&
+                !(execOpts === null || execOpts === void 0 ? void 0 : execOpts.liveOutput) &&
+                result.stdout.trim()) {
+                core.info(result.stdout.trim());
+            }
         }
         else {
-            core.info(result.stderr.trim());
+            if ((execOpts === null || execOpts === void 0 ? void 0 : execOpts.ignoreFailureLog) && (execOpts === null || execOpts === void 0 ? void 0 : execOpts.quiet)) {
+            }
+            else if (execOpts === null || execOpts === void 0 ? void 0 : execOpts.liveOutput) {
+                core.info(`git stderr was streamed above (${result.stderr.length} bytes); stdout ${result.stdout.length} bytes`);
+            }
+            else {
+                core.info(`--- git stderr (${result.stderr.length} bytes) ---`);
+                core.info(result.stderr.trim() || "(empty)");
+                core.info(`--- git stdout (${result.stdout.length} bytes) ---`);
+                core.info(result.stdout.trim() || "(empty)");
+            }
         }
         return result;
     });
@@ -325,19 +532,20 @@ var __importStar = (this && this.__importStar) || function (mod) {
     return result;
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.parseDisplayNameEmail = exports.getInputMergeMethod = exports.getStringAsArray = exports.getInputAsArray = void 0;
+exports.getInputAsArray = getInputAsArray;
+exports.getStringAsArray = getStringAsArray;
+exports.getInputMergeMethod = getInputMergeMethod;
+exports.parseDisplayNameEmail = parseDisplayNameEmail;
 const core = __importStar(__nccwpck_require__(2186));
 function getInputAsArray(name, options) {
     return getStringAsArray(core.getInput(name, options));
 }
-exports.getInputAsArray = getInputAsArray;
 function getStringAsArray(str) {
     return str
         .split(",")
         .map((s) => s.trim())
         .filter((x) => x !== "");
 }
-exports.getStringAsArray = getStringAsArray;
 function getInputMergeMethod(name, options) {
     const value = core.getInput(name, options);
     switch (value.trim()) {
@@ -351,7 +559,6 @@ function getInputMergeMethod(name, options) {
             return undefined;
     }
 }
-exports.getInputMergeMethod = getInputMergeMethod;
 function parseDisplayNameEmail(displayNameEmail) {
     const pattern = /^([^<]+)\s*<([^>]+)>$/i;
     const match = displayNameEmail.match(pattern);
@@ -365,7 +572,6 @@ function parseDisplayNameEmail(displayNameEmail) {
     }
     return { name, email };
 }
-exports.parseDisplayNameEmail = parseDisplayNameEmail;
 
 
 /***/ }),
@@ -377,7 +583,11 @@ exports.parseDisplayNameEmail = parseDisplayNameEmail;
 
 var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
     if (k2 === undefined) k2 = k;
-    Object.defineProperty(o, k2, { enumerable: true, get: function() { return m[k]; } });
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
 }) : (function(o, m, k, k2) {
     if (k2 === undefined) k2 = k;
     o[k2] = m[k];
@@ -390,7 +600,7 @@ var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (
 var __importStar = (this && this.__importStar) || function (mod) {
     if (mod && mod.__esModule) return mod;
     var result = {};
-    if (mod != null) for (var k in mod) if (k !== "default" && Object.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
+    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
     __setModuleDefault(result, mod);
     return result;
 };
@@ -452,13 +662,13 @@ class Command {
     }
 }
 function escapeData(s) {
-    return utils_1.toCommandValue(s)
+    return (0, utils_1.toCommandValue)(s)
         .replace(/%/g, '%25')
         .replace(/\r/g, '%0D')
         .replace(/\n/g, '%0A');
 }
 function escapeProperty(s) {
-    return utils_1.toCommandValue(s)
+    return (0, utils_1.toCommandValue)(s)
         .replace(/%/g, '%25')
         .replace(/\r/g, '%0D')
         .replace(/\n/g, '%0A')
@@ -476,7 +686,11 @@ function escapeProperty(s) {
 
 var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
     if (k2 === undefined) k2 = k;
-    Object.defineProperty(o, k2, { enumerable: true, get: function() { return m[k]; } });
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
 }) : (function(o, m, k, k2) {
     if (k2 === undefined) k2 = k;
     o[k2] = m[k];
@@ -489,7 +703,7 @@ var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (
 var __importStar = (this && this.__importStar) || function (mod) {
     if (mod && mod.__esModule) return mod;
     var result = {};
-    if (mod != null) for (var k in mod) if (k !== "default" && Object.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
+    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
     __setModuleDefault(result, mod);
     return result;
 };
@@ -503,7 +717,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.getIDToken = exports.getState = exports.saveState = exports.group = exports.endGroup = exports.startGroup = exports.info = exports.notice = exports.warning = exports.error = exports.debug = exports.isDebug = exports.setFailed = exports.setCommandEcho = exports.setOutput = exports.getBooleanInput = exports.getMultilineInput = exports.getInput = exports.addPath = exports.setSecret = exports.exportVariable = exports.ExitCode = void 0;
+exports.platform = exports.toPlatformPath = exports.toWin32Path = exports.toPosixPath = exports.markdownSummary = exports.summary = exports.getIDToken = exports.getState = exports.saveState = exports.group = exports.endGroup = exports.startGroup = exports.info = exports.notice = exports.warning = exports.error = exports.debug = exports.isDebug = exports.setFailed = exports.setCommandEcho = exports.setOutput = exports.getBooleanInput = exports.getMultilineInput = exports.getInput = exports.addPath = exports.setSecret = exports.exportVariable = exports.ExitCode = void 0;
 const command_1 = __nccwpck_require__(7351);
 const file_command_1 = __nccwpck_require__(717);
 const utils_1 = __nccwpck_require__(5278);
@@ -523,7 +737,7 @@ var ExitCode;
      * A code indicating that the action was a failure
      */
     ExitCode[ExitCode["Failure"] = 1] = "Failure";
-})(ExitCode = exports.ExitCode || (exports.ExitCode = {}));
+})(ExitCode || (exports.ExitCode = ExitCode = {}));
 //-----------------------------------------------------------------------
 // Variables
 //-----------------------------------------------------------------------
@@ -534,17 +748,13 @@ var ExitCode;
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function exportVariable(name, val) {
-    const convertedVal = utils_1.toCommandValue(val);
+    const convertedVal = (0, utils_1.toCommandValue)(val);
     process.env[name] = convertedVal;
     const filePath = process.env['GITHUB_ENV'] || '';
     if (filePath) {
-        const delimiter = '_GitHubActionsFileCommandDelimeter_';
-        const commandValue = `${name}<<${delimiter}${os.EOL}${convertedVal}${os.EOL}${delimiter}`;
-        file_command_1.issueCommand('ENV', commandValue);
+        return (0, file_command_1.issueFileCommand)('ENV', (0, file_command_1.prepareKeyValueMessage)(name, val));
     }
-    else {
-        command_1.issueCommand('set-env', { name }, convertedVal);
-    }
+    (0, command_1.issueCommand)('set-env', { name }, convertedVal);
 }
 exports.exportVariable = exportVariable;
 /**
@@ -552,7 +762,7 @@ exports.exportVariable = exportVariable;
  * @param secret value of the secret
  */
 function setSecret(secret) {
-    command_1.issueCommand('add-mask', {}, secret);
+    (0, command_1.issueCommand)('add-mask', {}, secret);
 }
 exports.setSecret = setSecret;
 /**
@@ -562,10 +772,10 @@ exports.setSecret = setSecret;
 function addPath(inputPath) {
     const filePath = process.env['GITHUB_PATH'] || '';
     if (filePath) {
-        file_command_1.issueCommand('PATH', inputPath);
+        (0, file_command_1.issueFileCommand)('PATH', inputPath);
     }
     else {
-        command_1.issueCommand('add-path', {}, inputPath);
+        (0, command_1.issueCommand)('add-path', {}, inputPath);
     }
     process.env['PATH'] = `${inputPath}${path.delimiter}${process.env['PATH']}`;
 }
@@ -602,7 +812,10 @@ function getMultilineInput(name, options) {
     const inputs = getInput(name, options)
         .split('\n')
         .filter(x => x !== '');
-    return inputs;
+    if (options && options.trimWhitespace === false) {
+        return inputs;
+    }
+    return inputs.map(input => input.trim());
 }
 exports.getMultilineInput = getMultilineInput;
 /**
@@ -635,8 +848,12 @@ exports.getBooleanInput = getBooleanInput;
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function setOutput(name, value) {
+    const filePath = process.env['GITHUB_OUTPUT'] || '';
+    if (filePath) {
+        return (0, file_command_1.issueFileCommand)('OUTPUT', (0, file_command_1.prepareKeyValueMessage)(name, value));
+    }
     process.stdout.write(os.EOL);
-    command_1.issueCommand('set-output', { name }, value);
+    (0, command_1.issueCommand)('set-output', { name }, (0, utils_1.toCommandValue)(value));
 }
 exports.setOutput = setOutput;
 /**
@@ -645,7 +862,7 @@ exports.setOutput = setOutput;
  *
  */
 function setCommandEcho(enabled) {
-    command_1.issue('echo', enabled ? 'on' : 'off');
+    (0, command_1.issue)('echo', enabled ? 'on' : 'off');
 }
 exports.setCommandEcho = setCommandEcho;
 //-----------------------------------------------------------------------
@@ -676,7 +893,7 @@ exports.isDebug = isDebug;
  * @param message debug message
  */
 function debug(message) {
-    command_1.issueCommand('debug', {}, message);
+    (0, command_1.issueCommand)('debug', {}, message);
 }
 exports.debug = debug;
 /**
@@ -685,7 +902,7 @@ exports.debug = debug;
  * @param properties optional properties to add to the annotation.
  */
 function error(message, properties = {}) {
-    command_1.issueCommand('error', utils_1.toCommandProperties(properties), message instanceof Error ? message.toString() : message);
+    (0, command_1.issueCommand)('error', (0, utils_1.toCommandProperties)(properties), message instanceof Error ? message.toString() : message);
 }
 exports.error = error;
 /**
@@ -694,7 +911,7 @@ exports.error = error;
  * @param properties optional properties to add to the annotation.
  */
 function warning(message, properties = {}) {
-    command_1.issueCommand('warning', utils_1.toCommandProperties(properties), message instanceof Error ? message.toString() : message);
+    (0, command_1.issueCommand)('warning', (0, utils_1.toCommandProperties)(properties), message instanceof Error ? message.toString() : message);
 }
 exports.warning = warning;
 /**
@@ -703,7 +920,7 @@ exports.warning = warning;
  * @param properties optional properties to add to the annotation.
  */
 function notice(message, properties = {}) {
-    command_1.issueCommand('notice', utils_1.toCommandProperties(properties), message instanceof Error ? message.toString() : message);
+    (0, command_1.issueCommand)('notice', (0, utils_1.toCommandProperties)(properties), message instanceof Error ? message.toString() : message);
 }
 exports.notice = notice;
 /**
@@ -722,14 +939,14 @@ exports.info = info;
  * @param name The name of the output group
  */
 function startGroup(name) {
-    command_1.issue('group', name);
+    (0, command_1.issue)('group', name);
 }
 exports.startGroup = startGroup;
 /**
  * End an output group.
  */
 function endGroup() {
-    command_1.issue('endgroup');
+    (0, command_1.issue)('endgroup');
 }
 exports.endGroup = endGroup;
 /**
@@ -765,7 +982,11 @@ exports.group = group;
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function saveState(name, value) {
-    command_1.issueCommand('save-state', { name }, value);
+    const filePath = process.env['GITHUB_STATE'] || '';
+    if (filePath) {
+        return (0, file_command_1.issueFileCommand)('STATE', (0, file_command_1.prepareKeyValueMessage)(name, value));
+    }
+    (0, command_1.issueCommand)('save-state', { name }, (0, utils_1.toCommandValue)(value));
 }
 exports.saveState = saveState;
 /**
@@ -801,6 +1022,10 @@ var path_utils_1 = __nccwpck_require__(2981);
 Object.defineProperty(exports, "toPosixPath", ({ enumerable: true, get: function () { return path_utils_1.toPosixPath; } }));
 Object.defineProperty(exports, "toWin32Path", ({ enumerable: true, get: function () { return path_utils_1.toWin32Path; } }));
 Object.defineProperty(exports, "toPlatformPath", ({ enumerable: true, get: function () { return path_utils_1.toPlatformPath; } }));
+/**
+ * Platform utilities exports
+ */
+exports.platform = __importStar(__nccwpck_require__(5243));
 //# sourceMappingURL=core.js.map
 
 /***/ }),
@@ -813,7 +1038,11 @@ Object.defineProperty(exports, "toPlatformPath", ({ enumerable: true, get: funct
 // For internal use, subject to change.
 var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
     if (k2 === undefined) k2 = k;
-    Object.defineProperty(o, k2, { enumerable: true, get: function() { return m[k]; } });
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
 }) : (function(o, m, k, k2) {
     if (k2 === undefined) k2 = k;
     o[k2] = m[k];
@@ -826,18 +1055,19 @@ var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (
 var __importStar = (this && this.__importStar) || function (mod) {
     if (mod && mod.__esModule) return mod;
     var result = {};
-    if (mod != null) for (var k in mod) if (k !== "default" && Object.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
+    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
     __setModuleDefault(result, mod);
     return result;
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.issueCommand = void 0;
+exports.prepareKeyValueMessage = exports.issueFileCommand = void 0;
 // We use any as a valid input type
 /* eslint-disable @typescript-eslint/no-explicit-any */
+const crypto = __importStar(__nccwpck_require__(6113));
 const fs = __importStar(__nccwpck_require__(7147));
 const os = __importStar(__nccwpck_require__(2037));
 const utils_1 = __nccwpck_require__(5278);
-function issueCommand(command, message) {
+function issueFileCommand(command, message) {
     const filePath = process.env[`GITHUB_${command}`];
     if (!filePath) {
         throw new Error(`Unable to find environment variable for file command ${command}`);
@@ -845,11 +1075,26 @@ function issueCommand(command, message) {
     if (!fs.existsSync(filePath)) {
         throw new Error(`Missing file at path: ${filePath}`);
     }
-    fs.appendFileSync(filePath, `${utils_1.toCommandValue(message)}${os.EOL}`, {
+    fs.appendFileSync(filePath, `${(0, utils_1.toCommandValue)(message)}${os.EOL}`, {
         encoding: 'utf8'
     });
 }
-exports.issueCommand = issueCommand;
+exports.issueFileCommand = issueFileCommand;
+function prepareKeyValueMessage(key, value) {
+    const delimiter = `ghadelimiter_${crypto.randomUUID()}`;
+    const convertedValue = (0, utils_1.toCommandValue)(value);
+    // These should realistically never happen, but just in case someone finds a
+    // way to exploit uuid generation let's not allow keys or values that contain
+    // the delimiter.
+    if (key.includes(delimiter)) {
+        throw new Error(`Unexpected input: name should not contain the delimiter "${delimiter}"`);
+    }
+    if (convertedValue.includes(delimiter)) {
+        throw new Error(`Unexpected input: value should not contain the delimiter "${delimiter}"`);
+    }
+    return `${key}<<${delimiter}${os.EOL}${convertedValue}${os.EOL}${delimiter}`;
+}
+exports.prepareKeyValueMessage = prepareKeyValueMessage;
 //# sourceMappingURL=file-command.js.map
 
 /***/ }),
@@ -904,7 +1149,7 @@ class OidcClient {
                 .catch(error => {
                 throw new Error(`Failed to get ID Token. \n 
         Error Code : ${error.statusCode}\n 
-        Error Message: ${error.result.message}`);
+        Error Message: ${error.message}`);
             });
             const id_token = (_a = res.result) === null || _a === void 0 ? void 0 : _a.value;
             if (!id_token) {
@@ -922,9 +1167,9 @@ class OidcClient {
                     const encodedAudience = encodeURIComponent(audience);
                     id_token_url = `${id_token_url}&audience=${encodedAudience}`;
                 }
-                core_1.debug(`ID token url is ${id_token_url}`);
+                (0, core_1.debug)(`ID token url is ${id_token_url}`);
                 const id_token = yield OidcClient.getCall(id_token_url);
-                core_1.setSecret(id_token);
+                (0, core_1.setSecret)(id_token);
                 return id_token;
             }
             catch (error) {
@@ -945,7 +1190,11 @@ exports.OidcClient = OidcClient;
 
 var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
     if (k2 === undefined) k2 = k;
-    Object.defineProperty(o, k2, { enumerable: true, get: function() { return m[k]; } });
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
 }) : (function(o, m, k, k2) {
     if (k2 === undefined) k2 = k;
     o[k2] = m[k];
@@ -958,7 +1207,7 @@ var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (
 var __importStar = (this && this.__importStar) || function (mod) {
     if (mod && mod.__esModule) return mod;
     var result = {};
-    if (mod != null) for (var k in mod) if (k !== "default" && Object.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
+    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
     __setModuleDefault(result, mod);
     return result;
 };
@@ -1000,6 +1249,107 @@ function toPlatformPath(pth) {
 }
 exports.toPlatformPath = toPlatformPath;
 //# sourceMappingURL=path-utils.js.map
+
+/***/ }),
+
+/***/ 5243:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || function (mod) {
+    if (mod && mod.__esModule) return mod;
+    var result = {};
+    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
+    __setModuleDefault(result, mod);
+    return result;
+};
+var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
+    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
+    return new (P || (P = Promise))(function (resolve, reject) {
+        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
+        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
+        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
+        step((generator = generator.apply(thisArg, _arguments || [])).next());
+    });
+};
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.getDetails = exports.isLinux = exports.isMacOS = exports.isWindows = exports.arch = exports.platform = void 0;
+const os_1 = __importDefault(__nccwpck_require__(2037));
+const exec = __importStar(__nccwpck_require__(1514));
+const getWindowsInfo = () => __awaiter(void 0, void 0, void 0, function* () {
+    const { stdout: version } = yield exec.getExecOutput('powershell -command "(Get-CimInstance -ClassName Win32_OperatingSystem).Version"', undefined, {
+        silent: true
+    });
+    const { stdout: name } = yield exec.getExecOutput('powershell -command "(Get-CimInstance -ClassName Win32_OperatingSystem).Caption"', undefined, {
+        silent: true
+    });
+    return {
+        name: name.trim(),
+        version: version.trim()
+    };
+});
+const getMacOsInfo = () => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c, _d;
+    const { stdout } = yield exec.getExecOutput('sw_vers', undefined, {
+        silent: true
+    });
+    const version = (_b = (_a = stdout.match(/ProductVersion:\s*(.+)/)) === null || _a === void 0 ? void 0 : _a[1]) !== null && _b !== void 0 ? _b : '';
+    const name = (_d = (_c = stdout.match(/ProductName:\s*(.+)/)) === null || _c === void 0 ? void 0 : _c[1]) !== null && _d !== void 0 ? _d : '';
+    return {
+        name,
+        version
+    };
+});
+const getLinuxInfo = () => __awaiter(void 0, void 0, void 0, function* () {
+    const { stdout } = yield exec.getExecOutput('lsb_release', ['-i', '-r', '-s'], {
+        silent: true
+    });
+    const [name, version] = stdout.trim().split('\n');
+    return {
+        name,
+        version
+    };
+});
+exports.platform = os_1.default.platform();
+exports.arch = os_1.default.arch();
+exports.isWindows = exports.platform === 'win32';
+exports.isMacOS = exports.platform === 'darwin';
+exports.isLinux = exports.platform === 'linux';
+function getDetails() {
+    return __awaiter(this, void 0, void 0, function* () {
+        return Object.assign(Object.assign({}, (yield (exports.isWindows
+            ? getWindowsInfo()
+            : exports.isMacOS
+                ? getMacOsInfo()
+                : getLinuxInfo()))), { platform: exports.platform,
+            arch: exports.arch,
+            isWindows: exports.isWindows,
+            isMacOS: exports.isMacOS,
+            isLinux: exports.isLinux });
+    });
+}
+exports.getDetails = getDetails;
+//# sourceMappingURL=platform.js.map
 
 /***/ }),
 
@@ -10490,6 +10840,14 @@ module.exports = require("assert");
 
 "use strict";
 module.exports = require("child_process");
+
+/***/ }),
+
+/***/ 6113:
+/***/ ((module) => {
+
+"use strict";
+module.exports = require("crypto");
 
 /***/ }),
 
